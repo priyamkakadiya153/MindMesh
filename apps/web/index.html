@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="author" content="MindMesh Team" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://mindmesh.ai/" />
+
+    <!-- Primary SEO Meta Tags -->
+    <meta name="description" content="MindMesh - AI-Powered Knowledge Intelligence System transforming conversations into structured, searchable organizational memory." />
+    <meta name="keywords" content="Knowledge OS, AI Knowledge Intelligence, Semantic Search, Conversation Summarization, Organizational Memory" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>MindMesh — Transform Conversations into Knowledge</title>
+
+    <!-- Open Graph / Facebook / LinkedIn / WhatsApp -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mindmesh.ai/" />
+    <meta property="og:title" content="MindMesh — Transform Conversations into Knowledge" />
+    <meta property="og:description" content="Intelligent organizational memory platform with grounded AI search, file parsing, and discussion summaries." />
+    <meta property="og:image" content="https://mindmesh.ai/og-preview.png" />
+    <meta property="og:site_name" content="MindMesh" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://mindmesh.ai/" />
+    <meta name="twitter:title" content="MindMesh — Transform Conversations into Knowledge" />
+    <meta name="twitter:description" content="Intelligent organizational memory platform with grounded AI search, file parsing, and discussion summaries." />
+    <meta name="twitter:image" content="https://mindmesh.ai/og-preview.png" />
+    <meta name="twitter:site" content="@mindmesh_ai" />
+
+    <!-- Schema.org JSON-LD Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "name": "MindMesh",
+            "operatingSystem": "Web",
+            "applicationCategory": "BusinessApplication",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "description": "AI-Powered Knowledge Intelligence System transforming conversations into structured, searchable organizational memory."
+          },
+          {
+            "@type": "Organization",
+            "name": "MindMesh",
+            "url": "https://mindmesh.ai/",
+            "logo": "https://mindmesh.ai/vite.svg"
+          }
+        ]
+      }
+    </script>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('mindmesh_theme');
+          var theme = (saved && (saved === 'light' || saved === 'dark' || saved === 'system')) ? saved : null;
+          if (!theme) {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          var isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var docEl = document.documentElement;
+          if (isDark) {
+            docEl.classList.add('dark');
+            docEl.classList.remove('light');
+            docEl.style.colorScheme = 'dark';
+          } else {
+            docEl.classList.remove('dark');
+            docEl.classList.add('light');
+            docEl.style.colorScheme = 'light';
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

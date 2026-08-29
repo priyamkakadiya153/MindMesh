@@ -1,0 +1,17 @@
+# MindMesh Robots.txt
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /register
+
+# Block private / authenticated application routes from indexing
+Disallow: /dashboard
+Disallow: /projects
+Disallow: /documents
+Disallow: /settings
+Disallow: /members
+Disallow: /chat
+Disallow: /messages
+Disallow: /api/
+
+Sitemap: https://mindmesh.ai/sitemap.xml
