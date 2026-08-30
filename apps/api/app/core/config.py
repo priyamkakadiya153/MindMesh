@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import sys
@@ -55,10 +55,23 @@ class Settings(BaseSettings):
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
-    def assemble_db_connection(cls, v: str) -> str:
-        if v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+    def assemble_db_connection(cls, v: Any) -> str:
+        if not v:
+            return "postgresql+asyncpg://postgres:postgres@localhost:5432/mindmesh"
+        s = str(v).strip().strip('\'"\\').strip()
+        if s.startswith("postgres://"):
+            s = "postgresql+asyncpg://" + s[len("postgres://"):]
+        elif s.startswith("postgresql://"):
+            s = "postgresql+asyncpg://" + s[len("postgresql://"):]
+        return s
+
+    @field_validator("REDIS_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
+    @classmethod
+    def clean_string_settings(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().strip('\'"\\').strip()
         return v
+
 
     def validate_smtp_config(self) -> None:
         """Verifies required SMTP settings at startup and logs loaded configuration."""
