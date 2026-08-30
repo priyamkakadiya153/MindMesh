@@ -1,7 +1,8 @@
 import logging
 from uuid import UUID
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.memory.models import LongTermMemory

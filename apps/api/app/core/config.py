@@ -81,7 +81,18 @@ class Settings(BaseSettings):
                 s = f"{scheme}://{user}:{encoded_pwd}@{host_part}"
         return s
 
-    @field_validator("REDIS_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
+    @field_validator("REDIS_URL", mode="before")
+    @classmethod
+    def assemble_redis_connection(cls, v: Any) -> str:
+        if not v:
+            return "redis://localhost:6379"
+        s = str(v).strip().strip('\'"\\').strip()
+        if not any(s.startswith(prefix) for prefix in ["redis://", "rediss://", "unix://"]):
+            print(f"[CONFIG WARNING] Invalid REDIS_URL scheme '{s}', defaulting to redis://localhost:6379.")
+            return "redis://localhost:6379"
+        return s
+
+    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
     @classmethod
     def clean_string_settings(cls, v: Any) -> Any:
         if isinstance(v, str):
