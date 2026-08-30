@@ -1,9 +1,10 @@
+from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List, Optional
 import re
 from .repository import WorkspaceRepository
-from .models import Workspace, WorkspaceMember
+from .models import Workspace, WorkspaceMember, WorkspaceSettings
 from .exceptions import WorkspaceNotFoundError, DuplicateWorkspaceNameError
 
 class WorkspaceService:
