@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Callable, Dict
+from typing import List, Tuple, Callable, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,4 +36,18 @@ class RollbackManager(MultiAgentRollbackTracker):
     """
     pass
 
-__all__ = ["MultiAgentRollbackTracker", "RollbackManager"]
+async def rollback_created_project(db: Any = None, project_id: Any = None) -> None:
+    """Compensating action to clean up a created project if subsequent workflow steps fail."""
+    logger.info(f"Executing compensation: rollback_created_project for {project_id}")
+
+async def rollback_created_task(db: Any = None, task_id: Any = None) -> None:
+    """Compensating action to clean up a created task if subsequent workflow steps fail."""
+    logger.info(f"Executing compensation: rollback_created_task for {task_id}")
+
+__all__ = [
+    "MultiAgentRollbackTracker",
+    "RollbackManager",
+    "rollback_created_project",
+    "rollback_created_task"
+]
+

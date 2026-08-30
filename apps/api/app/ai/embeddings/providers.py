@@ -32,6 +32,9 @@ class BaseEmbeddingProvider(ABC):
         norm = (sum(x * x for x in vec)) ** 0.5
         return [x / norm for x in vec] if norm > 0 else vec
 
+EmbeddingProvider = BaseEmbeddingProvider
+
+
 class GeminiEmbeddingProvider(BaseEmbeddingProvider):
     def __init__(self, model_name: str = "text-embedding-004"):
         super().__init__(model_name=model_name, dimension=768)
