@@ -64,26 +64,31 @@ def get_request_metadata(request: Request):
     return device_name, ip_address, user_agent
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
+    is_prod = (settings.NODE_ENV == "production")
+    samesite_val = "none" if is_prod else "lax"
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        samesite="lax",
-        secure=(settings.NODE_ENV == "production"),
+        samesite=samesite_val,
+        secure=is_prod,
         max_age=15 * 60,
     )
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        samesite="lax",
-        secure=(settings.NODE_ENV == "production"),
+        samesite=samesite_val,
+        secure=is_prod,
         max_age=30 * 24 * 60 * 60,
     )
 
 def clear_auth_cookies(response: Response):
-    response.delete_cookie(key="access_token", httponly=True, samesite="lax", secure=(settings.NODE_ENV == "production"))
-    response.delete_cookie(key="refresh_token", httponly=True, samesite="lax", secure=(settings.NODE_ENV == "production"))
+    is_prod = (settings.NODE_ENV == "production")
+    samesite_val = "none" if is_prod else "lax"
+    response.delete_cookie(key="access_token", httponly=True, samesite=samesite_val, secure=is_prod)
+    response.delete_cookie(key="refresh_token", httponly=True, samesite=samesite_val, secure=is_prod)
+
 
 @router.post("/register", response_model=RegisterSendOtpResponse)
 async def register(request: Request, user_in: UserRegister, db: AsyncSession = Depends(get_db_session)):

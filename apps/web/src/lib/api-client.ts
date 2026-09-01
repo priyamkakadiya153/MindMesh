@@ -1,7 +1,14 @@
 import axios from 'axios';
 import { useAuthStore } from '../features/auth/auth-store';
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || '/api/v1';
+const getApiBase = () => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (!envUrl || envUrl === '/api/v1') return '/api/v1';
+  const cleanUrl = envUrl.trim().replace(/\/+$/, '');
+  return cleanUrl.endsWith('/api/v1') ? cleanUrl : `${cleanUrl}/api/v1`;
+};
+
+const API_BASE = getApiBase();
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
@@ -10,6 +17,7 @@ export const apiClient = axios.create({
   },
   withCredentials: true,
 });
+
 
 // Request interceptor to attach Bearer Token and X-Organization-ID
 apiClient.interceptors.request.use(

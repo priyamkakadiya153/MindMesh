@@ -21,8 +21,10 @@ build/
 develop-eggs/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
+!apps/web/src/lib/
+
 parts/
 sdist/
 var/

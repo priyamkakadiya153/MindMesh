@@ -35,18 +35,33 @@ async def add_security_headers(request: Request, call_next):
 app.add_middleware(RateLimitMiddleware, max_requests=10, window_seconds=60)
 app.add_middleware(AuthorizationMiddleware)
 
+import os
+
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:5173",
+    "https://mindmesh-kappa.vercel.app",
+]
+
+cors_env = os.getenv("CORS_ORIGINS", "")
+if cors_env:
+    cors_origins.extend([o.strip() for o in cors_env.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001"
-    ],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.onrender\.com|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Global Exception Handlers
 @app.exception_handler(StarletteHTTPException)
@@ -124,7 +139,9 @@ from .websocket.router import router as websocket_router
 
 # Register v1 API Router
 app.include_router(v1_router, prefix="/api/v1")
+app.include_router(v1_router, prefix="/api")
 app.include_router(websocket_router, prefix="")
+
 
 
 @app.get("/")

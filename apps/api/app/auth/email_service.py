@@ -259,9 +259,17 @@ class EmailService:
         print(f"   OTP Code: {otp_code}")
         print(f"==================================================\n")
 
-        return await asyncio.to_thread(
-            self._send_smtp_sync, recipient_email, subject, text_content, html_content
-        )
+        try:
+            return await asyncio.to_thread(
+                self._send_smtp_sync, recipient_email, subject, text_content, html_content
+            )
+        except Exception as e:
+            if settings.NODE_ENV == "development":
+                logger.warning(f"[DEV FALLBACK] SMTP failed ({e}). Proceeding in development mode. OTP Code is: {otp_code}")
+                print(f"\n[DEV FALLBACK] SMTP failed ({e}), but in development mode OTP code is: {otp_code}\n")
+                return True
+            raise
+
 
     def _build_password_reset_email_html(self, user_name: str, code: str, token: str, recipient_email: str) -> str:
         safe_name = user_name or "MindMesh User"
