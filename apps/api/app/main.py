@@ -63,11 +63,23 @@ app.add_middleware(
 )
 
 
+def make_cors_headers(request: Request) -> dict:
+    origin = request.headers.get("origin")
+    if origin:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+            "Access-Control-Allow-Headers": "*",
+        }
+    return {}
+
 # Global Exception Handlers
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
+        headers=make_cors_headers(request),
         content={
             "success": False,
             "error": "HTTPException",
@@ -90,6 +102,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        headers=make_cors_headers(request),
         content={
             "error": "ValidationError",
             "message": readable_message,
@@ -111,6 +124,7 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
     detail_msg = f"Database error: {str(exc)}"
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
+        headers=make_cors_headers(request),
         content={
             "error": "DatabaseError",
             "message": detail_msg,
@@ -123,17 +137,19 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception(f"[UNHANDLED EXCEPTION] {request.method} {request.url.path}: {exc}")
-    user_msg = "An unexpected server error occurred. Please try again."
+    err_detail = f"{type(exc).__name__}: {str(exc)}"
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        headers=make_cors_headers(request),
         content={
-            "error": "InternalServerError",
-            "message": user_msg,
-            "detail": user_msg,
+            "error": type(exc).__name__,
+            "message": err_detail,
+            "detail": err_detail,
             "status_code": 500,
             "timestamp": time.time()
         }
     )
+
 
 from .websocket.router import router as websocket_router
 

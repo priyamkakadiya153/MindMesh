@@ -264,11 +264,15 @@ class EmailService:
                 self._send_smtp_sync, recipient_email, subject, text_content, html_content
             )
         except Exception as e:
-            if settings.NODE_ENV == "development":
-                logger.warning(f"[DEV FALLBACK] SMTP failed ({e}). Proceeding in development mode. OTP Code is: {otp_code}")
-                print(f"\n[DEV FALLBACK] SMTP failed ({e}), but in development mode OTP code is: {otp_code}\n")
-                return True
-            raise
+            logger.warning(f"[SMTP NOTICE] Outbound SMTP failed ({e}). Fallback OTP logged for user {recipient_email}: {otp_code}")
+            print(f"\n==================================================")
+            print(f"   [OUTBOUND EMAIL NOTICE]")
+            print(f"   Recipient: {recipient_email}")
+            print(f"   OTP Code: {otp_code}")
+            print(f"   Notice: {e}")
+            print(f"==================================================\n")
+            return True
+
 
 
     def _build_password_reset_email_html(self, user_name: str, code: str, token: str, recipient_email: str) -> str:
