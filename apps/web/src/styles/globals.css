@@ -258,7 +258,9 @@
     font-family: 'Inter', sans-serif;
     line-height: 1.5;
     transition: background-color 0.25s ease, color 0.25s ease;
-    @apply antialiased overflow-x-hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
 
 
@@ -286,14 +288,17 @@
   .text-gradient {
     background: linear-gradient(135deg, var(--color-text-primary) 0%, var(--color-accent) 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
   .text-gradient-hero {
     background: linear-gradient(135deg, #ffffff 0%, #a5b4fc 50%, #6366f1 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
   }
+
 
   .btn-gradient-primary {
     background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
