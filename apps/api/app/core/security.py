@@ -6,16 +6,22 @@ from .config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], bcrypt__rounds=10, deprecated="auto")
 
+def _truncate_password(password: str) -> str:
+    if not password:
+        return ""
+    return password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if not hashed_password or not plain_password:
         return False
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        return pwd_context.verify(_truncate_password(plain_password), hashed_password)
     except Exception:
         return False
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_truncate_password(password))
+
 
 import uuid
 
