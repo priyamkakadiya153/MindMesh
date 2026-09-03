@@ -259,10 +259,39 @@ class EmailService:
         print(f"   OTP Code: {otp_code}")
         print(f"==================================================\n")
 
+        # 1. Check if RESEND_API_KEY is configured (Uses HTTPS Port 443 - never blocked by Render firewall!)
+        resend_key = os.getenv("RESEND_API_KEY")
+        if resend_key:
+            try:
+                import httpx
+                payload = {
+                    "from": f"{self.from_name} <onboarding@resend.dev>",
+                    "to": [recipient_email],
+                    "subject": subject,
+                    "html": html_content,
+                    "text": text_content,
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        "https://api.resend.com/emails",
+                        headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
+                        json=payload
+                    )
+                    if resp.status_code in (200, 201):
+                        logger.info(f"[RESEND SUCCESS] Delivered OTP email via HTTPS to {recipient_email}")
+                        print(f"[RESEND SUCCESS] Delivered OTP email via HTTPS to {recipient_email}")
+                        return True
+                    else:
+                        logger.warning(f"[RESEND ERROR] Status {resp.status_code}: {resp.text}")
+            except Exception as e:
+                logger.warning(f"[RESEND EXCEPTION] {e}")
+
+        # 2. Standard SMTP delivery
         try:
             return await asyncio.to_thread(
                 self._send_smtp_sync, recipient_email, subject, text_content, html_content
             )
+
         except Exception as e:
             logger.warning(f"[SMTP NOTICE] Outbound SMTP failed ({e}). Fallback OTP logged for user {recipient_email}: {otp_code}")
             print(f"\n==================================================")
