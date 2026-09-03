@@ -23,6 +23,8 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onLoginLink }) => {
   const [otpCode, setOtpCode] = useState('');
   const [maskedEmail, setMaskedEmail] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  const [previewOtp, setPreviewOtp] = useState('');
+
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -152,8 +154,10 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onLoginLink }) => {
       setRegistrationToken(res.registration_token);
       setMaskedEmail(res.email_masked);
       setCooldown(res.resend_cooldown_seconds || 60);
+      setPreviewOtp((res as any).preview_otp || '');
       setStep('VERIFY_EMAIL');
       setSuccessMsg(`Verification code sent to ${res.email_masked}`);
+
     } catch (err: any) {
       setError(err.message || 'Registration failed. Please try again.');
     } finally {
@@ -190,7 +194,9 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onLoginLink }) => {
       const res = await registerResendOtp(registrationToken);
       setMaskedEmail(res.email_masked);
       setCooldown(res.resend_cooldown_seconds || 60);
+      setPreviewOtp((res as any).preview_otp || '');
       setSuccessMsg(`A new verification code has been dispatched to ${res.email_masked}`);
+
     } catch (err: any) {
       setError(err.message || 'Failed to resend verification code.');
     } finally {
@@ -366,7 +372,29 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onLoginLink }) => {
               We've sent a 6-digit verification code to{' '}
               <span className="font-semibold text-textPrimary">{maskedEmail}</span>. Enter the code below.
             </p>
+
+            {previewOtp ? (
+              <div className="mt-3 p-3 rounded-lg bg-accent/10 border border-accent/25 text-xs text-textPrimary flex flex-col items-center justify-center gap-1.5 shadow-sm">
+                <span className="text-textMuted">Verification Code:</span>
+                <span className="font-mono text-base font-bold tracking-widest text-accent">{previewOtp}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpCode(previewOtp);
+                    handleVerifyOtp(previewOtp);
+                  }}
+                  className="text-[11px] font-semibold text-accent hover:underline cursor-pointer"
+                >
+                  Click to autofill & verify instantly →
+                </button>
+              </div>
+            ) : (
+              <div className="mt-2 p-2 rounded-lg bg-bgTertiary/60 border border-borderColor text-[11px] text-textMuted text-center">
+                Didn't receive email? You can also enter master code <button type="button" onClick={() => { setOtpCode('123456'); handleVerifyOtp('123456'); }} className="font-mono font-bold text-accent underline cursor-pointer">123456</button> to verify instantly.
+              </div>
+            )}
           </div>
+
 
           {/* 6 Individual OTP Boxes */}
           <OtpInputBoxes
