@@ -9,33 +9,44 @@ from alembic import command
 
 def run_migrations():
     try:
-        print("[Lifespan] Running database migrations...")
+        print("[Lifespan] Running database migrations...", flush=True)
         cfg = Config("alembic.ini")
         command.upgrade(cfg, "head")
-        print("[Lifespan] Database migrations completed successfully.")
+        print("[Lifespan] Database migrations completed successfully.", flush=True)
     except Exception as e:
-        print(f"[Lifespan Notice] Programmatic migration skipped or completed: {str(e)}")
+        print(f"[Lifespan Notice] Programmatic migration skipped or completed: {str(e)}", flush=True)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup lifecycle hooks
-    print("[Lifespan] Starting up MindMesh API Backend...")
-    
-    # Run migrations safely in worker thread to prevent event loop blocking/conflicts
+async def initialize_database_background():
+    """Performs schema synchronization in background so port binding is instantaneous."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, run_migrations)
+    try:
+        # Run migrations with a 15-second timeout so it never hangs indefinitely
+        await asyncio.wait_for(loop.run_in_executor(None, run_migrations), timeout=15.0)
+    except asyncio.TimeoutError:
+        print("[Lifespan Notice] Database migration timed out. Relying on metadata create_all.", flush=True)
+    except Exception as e:
+        print(f"[Lifespan Notice] Migration exception: {e}", flush=True)
 
     try:
         await verify_connection()
-        print("[Lifespan] Database connection verified successfully.")
+        print("[Lifespan] Database connection & tables verified successfully.", flush=True)
         
         # Run seed data
         async with AsyncSessionLocal() as session:
             await seed_data(session)
             await session.commit()
-            print("[Lifespan] Database auto-seeding completed.")
+            print("[Lifespan] Database auto-seeding completed.", flush=True)
     except Exception as e:
-        print(f"[Lifespan Warn] Database verification or seeding failed: {str(e)}")
+        print(f"[Lifespan Warn] Database verification or seeding warning: {str(e)}", flush=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup lifecycle hooks
+    print("[Lifespan] Starting up MindMesh API Backend...", flush=True)
+    
+    # Launch database initialization in non-blocking task so Uvicorn opens port immediately!
+    asyncio.create_task(initialize_database_background())
+
 
     # Start EventDispatcher, BackgroundWorkerManager, LearningScheduler and ReminderScheduler
     try:

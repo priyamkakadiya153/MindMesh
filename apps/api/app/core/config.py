@@ -87,10 +87,16 @@ class Settings(BaseSettings):
         if not v:
             return "redis://localhost:6379"
         s = str(v).strip().strip('\'"\\').strip()
+        if "redis-cli" in s or "-u " in s:
+            import re
+            m = re.search(r"(rediss?://[^\s'\"]+)", s)
+            if m:
+                s = m.group(1)
         if not any(s.startswith(prefix) for prefix in ["redis://", "rediss://", "unix://"]):
             print(f"[CONFIG WARNING] Invalid REDIS_URL scheme '{s}', defaulting to redis://localhost:6379.")
             return "redis://localhost:6379"
         return s
+
 
     @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
     @classmethod

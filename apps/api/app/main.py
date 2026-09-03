@@ -173,7 +173,9 @@ async def root_welcome():
     }
 
 @app.get("/health")
+@app.get("/api/v1/health")
 async def health_check(session: AsyncSession = Depends(get_session)):
+
     try:
         await session.execute(text("SELECT 1"))
         db_status = "connected"
