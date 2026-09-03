@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: Optional[str] = None
     SMTP_USE_TLS: bool = True
     RESEND_API_KEY: Optional[str] = None
+    RESEND_FROM_EMAIL: Optional[str] = None
+    BREVO_API_KEY: Optional[str] = None
+    SENDGRID_API_KEY: Optional[str] = None
+
 
 
     # Documents & Storage configurations
@@ -100,8 +104,7 @@ class Settings(BaseSettings):
         return s
 
 
-    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "RESEND_API_KEY", mode="before")
-
+    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "RESEND_API_KEY", "RESEND_FROM_EMAIL", "BREVO_API_KEY", "SENDGRID_API_KEY", mode="before")
     @classmethod
     def clean_string_settings(cls, v: Any) -> Any:
         if isinstance(v, str):
@@ -115,6 +118,7 @@ class Settings(BaseSettings):
         user_ok = bool(self.SMTP_USERNAME and self.SMTP_USERNAME.strip())
         pass_ok = bool(self.SMTP_PASSWORD and self.SMTP_PASSWORD.strip())
         from_ok = bool(self.SMTP_FROM_EMAIL and self.SMTP_FROM_EMAIL.strip())
+        has_http_email = bool(self.BREVO_API_KEY or self.RESEND_API_KEY or self.SENDGRID_API_KEY)
 
         # Mask database URL for clean logging
         masked_db = self.DATABASE_URL
@@ -139,29 +143,34 @@ class Settings(BaseSettings):
         print(f"   [OK] DATABASE_URL: {masked_db}")
         print(f"   [OK] REDIS_URL: {masked_redis}")
         print(f"   [OK] GEMINI_API_KEY present: {bool(self.GEMINI_API_KEY)}")
+        print(f"   [OK] BREVO_API_KEY present: {bool(self.BREVO_API_KEY)}")
+        print(f"   [OK] RESEND_API_KEY present: {bool(self.RESEND_API_KEY)}")
+        print(f"   [OK] SENDGRID_API_KEY present: {bool(self.SENDGRID_API_KEY)}")
         print(f"   [OK] SMTP_HOST: {self.SMTP_HOST}:{self.SMTP_PORT}")
         print(f"   [OK] SMTP_USERNAME: {self.SMTP_USERNAME}")
         print(f"   [OK] SMTP_FROM_EMAIL: {self.SMTP_FROM_EMAIL}")
         print(f"==================================================\n")
 
         missing = []
-        if not user_ok:
-            missing.append("SMTP_USERNAME")
-        if not pass_ok:
-            missing.append("SMTP_PASSWORD")
-        if not from_ok:
-            missing.append("SMTP_FROM_EMAIL")
+        if not (has_http_email or (user_ok and pass_ok)):
+            if not user_ok:
+                missing.append("SMTP_USERNAME (or BREVO_API_KEY / RESEND_API_KEY)")
+            if not pass_ok:
+                missing.append("SMTP_PASSWORD")
+            if not from_ok:
+                missing.append("SMTP_FROM_EMAIL")
 
         if missing:
             err_msg = (
-                f"[CRITICAL CONFIG ERROR] Missing required SMTP environment variables: {', '.join(missing)}. "
-                f"Please check your .env file and ensure SMTP_USERNAME and SMTP_PASSWORD are set."
+                f"[CRITICAL CONFIG ERROR] Missing required email delivery configuration: {', '.join(missing)}. "
+                f"Please ensure either SMTP credentials or an HTTP email provider API key is set."
             )
             print(f"\n{err_msg}\n", file=sys.stderr)
             raise RuntimeError(err_msg)
 
 settings = Settings()
 settings.validate_startup_config()
+
 
 
 

@@ -33,7 +33,7 @@ class RegisterSendOtpResponse(BaseModel):
     registration_token: str
     expires_in_seconds: int = 300
     resend_cooldown_seconds: int = 60
-    preview_otp: Optional[str] = None
+
 
 
 class RegisterResendOtpRequest(BaseModel):

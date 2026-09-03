@@ -94,10 +94,22 @@ class EmailVerificationService:
 
 import socket
 
+def mask_email(email: str) -> str:
+    """Safely masks an email address for logs (e.g. p***a@domain.com)."""
+    if not email or "@" not in email:
+        return "***"
+    user, domain = email.split("@", 1)
+    if len(user) <= 2:
+        masked_user = user[0] + "***"
+    else:
+        masked_user = user[0] + "***" + user[-1]
+    return f"{masked_user}@{domain}"
+
+
 class EmailService:
     """
-    Handles outbound email transmission via SMTP using standard TLS authentication.
-    Configured via settings (SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, etc.).
+    Enterprise Email Service supporting both HTTP REST APIs (Brevo, Resend, SendGrid)
+    over Port 443 and standard TLS SMTP. Never swallows delivery failures or logs plaintext OTPs.
     """
 
     def __init__(self):
@@ -107,6 +119,10 @@ class EmailService:
         self.smtp_password = settings.SMTP_PASSWORD
         self.from_name = settings.SMTP_FROM_NAME or "MindMesh"
         self.from_email = settings.SMTP_FROM_EMAIL or self.smtp_username or "auth@mindmesh.ai"
+        self.resend_api_key = (getattr(settings, "RESEND_API_KEY", None) or os.getenv("RESEND_API_KEY", "") or "").strip()
+        self.resend_from_email = getattr(settings, "RESEND_FROM_EMAIL", None) or os.getenv("RESEND_FROM_EMAIL", "")
+        self.brevo_api_key = (getattr(settings, "BREVO_API_KEY", None) or os.getenv("BREVO_API_KEY", "") or "").strip()
+        self.sendgrid_api_key = (getattr(settings, "SENDGRID_API_KEY", None) or os.getenv("SENDGRID_API_KEY", "") or "").strip()
 
     def _build_otp_email_html(self, user_name: str, otp_code: str) -> str:
         safe_name = user_name or "MindMesh User"
@@ -115,7 +131,7 @@ class EmailService:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MindMesh Verification Code</title>
+    <title>Verify your MindMesh email</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width: 100%; background-color: #0f172a; padding: 40px 20px;">
@@ -135,7 +151,7 @@ class EmailService:
                         <td style="padding: 32px;">
                             <h2 style="margin: 0 0 12px 0; color: #f8fafc; font-size: 18px; font-weight: 600;">Hello {safe_name},</h2>
                             <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">
-                                Your MindMesh login verification code is:
+                                Your MindMesh email verification code is:
                             </p>
                             
                             <!-- Code Display Box -->
@@ -143,12 +159,15 @@ class EmailService:
                                 <span style="font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 700; color: #818cf8; letter-spacing: 8px; display: inline-block;">{otp_code}</span>
                             </div>
                             
-                            <p style="margin: 0 0 12px 0; color: #f59e0b; font-size: 13px; font-weight: 500; text-align: center;">
+                            <p style="margin: 0 0 8px 0; color: #f59e0b; font-size: 13px; font-weight: 500; text-align: center;">
                                 &#9200; This code expires in 5 minutes.
+                            </p>
+                            <p style="margin: 0 0 16px 0; color: #ef4444; font-size: 12px; font-weight: 500; text-align: center;">
+                                Do not share this code with anyone. MindMesh will never ask for your code.
                             </p>
                             
                             <p style="margin: 24px 0 0 0; color: #64748b; font-size: 13px; line-height: 1.5; border-top: 1px solid #334155; padding-top: 20px;">
-                                If you did not request this login, please ignore this email.
+                                If you did not request this verification code, please ignore this email.
                             </p>
                         </td>
                     </tr>
@@ -156,7 +175,7 @@ class EmailService:
                     <!-- Footer -->
                     <tr>
                         <td style="padding: 20px 32px; background-color: #0f172a; border-top: 1px solid #334155; text-align: center;">
-                            <p style="margin: 0; color: #64748b; font-size: 12px;">Regards,<br><strong style="color: #94a3b8;">MindMesh Engineering Team</strong></p>
+                            <p style="margin: 0; color: #64748b; font-size: 12px;">Regards,<br><strong style="color: #94a3b8;">MindMesh Security Team</strong></p>
                         </td>
                     </tr>
                 </table>
@@ -166,13 +185,100 @@ class EmailService:
 </body>
 </html>"""
 
-    def _send_smtp_sync(self, recipient_email: str, subject: str, text_content: str, html_content: str) -> bool:
+    async def _send_brevo_api(self, recipient_email: str, user_name: str, subject: str, text_content: str, html_content: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Sends email via Brevo (Sendinblue) HTTP REST API over Port 443."""
+        if not self.brevo_api_key:
+            return False, None, "Brevo API key not configured"
+
+        try:
+            import httpx
+            sender_email = self.from_email or "auth@mindmesh.ai"
+            payload = {
+                "sender": {"name": self.from_name, "email": sender_email},
+                "to": [{"email": recipient_email, "name": user_name or "User"}],
+                "subject": subject,
+                "htmlContent": html_content,
+                "textContent": text_content,
+            }
+            headers = {
+                "api-key": self.brevo_api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload)
+                if resp.status_code in (200, 201):
+                    msg_id = resp.json().get("messageId", f"brevo-{secrets.token_hex(4)}")
+                    return True, msg_id, None
+                else:
+                    return False, None, f"Brevo HTTP {resp.status_code}: {resp.text}"
+        except Exception as e:
+            return False, None, f"Brevo request exception: {str(e)}"
+
+    async def _send_resend_api(self, recipient_email: str, user_name: str, subject: str, text_content: str, html_content: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Sends email via Resend HTTP REST API over Port 443."""
+        if not self.resend_api_key:
+            return False, None, "Resend API key not configured"
+
+        try:
+            import httpx
+            from_sender = self.resend_from_email or (f"{self.from_name} <{self.from_email}>" if "@" in self.from_email and not self.from_email.endswith("mindmesh.ai") else f"{self.from_name} <onboarding@resend.dev>")
+            payload = {
+                "from": from_sender,
+                "to": [recipient_email],
+                "subject": subject,
+                "html": html_content,
+                "text": text_content,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.resend_api_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post("https://api.resend.com/emails", headers=headers, json=payload)
+                if resp.status_code in (200, 201):
+                    msg_id = resp.json().get("id", f"resend-{secrets.token_hex(4)}")
+                    return True, msg_id, None
+                else:
+                    return False, None, f"Resend HTTP {resp.status_code}: {resp.text}"
+        except Exception as e:
+            return False, None, f"Resend request exception: {str(e)}"
+
+    async def _send_sendgrid_api(self, recipient_email: str, user_name: str, subject: str, text_content: str, html_content: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Sends email via SendGrid HTTP REST API over Port 443."""
+        if not self.sendgrid_api_key:
+            return False, None, "SendGrid API key not configured"
+
+        try:
+            import httpx
+            sender_email = self.from_email or "auth@mindmesh.ai"
+            payload = {
+                "personalizations": [{"to": [{"email": recipient_email, "name": user_name or "User"}]}],
+                "from": {"email": sender_email, "name": self.from_name},
+                "subject": subject,
+                "content": [
+                    {"type": "text/plain", "value": text_content},
+                    {"type": "text/html", "value": html_content},
+                ]
+            }
+            headers = {
+                "Authorization": f"Bearer {self.sendgrid_api_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post("https://api.sendgrid.com/v3/mail/send", headers=headers, json=payload)
+                if resp.status_code in (200, 201, 202):
+                    msg_id = resp.headers.get("X-Message-Id", f"sendgrid-{secrets.token_hex(4)}")
+                    return True, msg_id, None
+                else:
+                    return False, None, f"SendGrid HTTP {resp.status_code}: {resp.text}"
+        except Exception as e:
+            return False, None, f"SendGrid request exception: {str(e)}"
+
+    def _send_smtp_sync(self, recipient_email: str, subject: str, text_content: str, html_content: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Sends email via standard TLS SMTP connection."""
         if not self.smtp_username or not self.smtp_password:
-            logger.error("[SMTP CONFIG ERROR] SMTP_USERNAME or SMTP_PASSWORD environment variable is missing!")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="SMTP credentials (SMTP_USERNAME / SMTP_PASSWORD) are not configured in backend environment."
-            )
+            return False, None, "SMTP credentials missing"
 
         clean_username = self.smtp_username.strip()
         clean_password = self.smtp_password.replace(" ", "")
@@ -187,123 +293,89 @@ class EmailService:
 
             part1 = MIMEText(text_content, "plain", "utf-8")
             part2 = MIMEText(html_content, "html", "utf-8")
-
             msg.attach(part1)
             msg.attach(part2)
 
-            logger.info(f"[SMTP STEP 1] Connecting to SMTP server {self.smtp_host}:{self.smtp_port}...")
-            print(f"[SMTP STEP 1] Connecting to SMTP server {self.smtp_host}:{self.smtp_port}...")
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=12) as server:
                 if settings.SMTP_USE_TLS:
-                    logger.info("[SMTP STEP 2] Starting TLS handshake (starttls)...")
-                    print("[SMTP STEP 2] Starting TLS handshake (starttls)...")
                     server.starttls()
-
-                logger.info(f"[SMTP STEP 3] Authenticating user {clean_username}...")
-                print(f"[SMTP STEP 3] Authenticating user {clean_username}...")
-                login_code, login_msg = server.login(clean_username, clean_password)
-                logger.info(f"[SMTP STEP 3 SUCCESS] Login response from Gmail: Code={login_code}, Msg={login_msg.decode('utf-8', errors='ignore') if isinstance(login_msg, bytes) else login_msg}")
-                print(f"[SMTP STEP 3 SUCCESS] Login response from Gmail: Code={login_code}, Msg={login_msg}")
-
-                logger.info(f"[SMTP STEP 4] Sending email payload to recipient {recipient_email}...")
-                print(f"[SMTP STEP 4] Sending email payload to recipient {recipient_email}...")
+                server.login(clean_username, clean_password)
                 refused = server.sendmail(self.from_email, [recipient_email], msg.as_string())
-
                 if refused:
-                    logger.error(f"[SMTP ERROR] Gmail refused recipient(s): {refused}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Gmail SMTP refused email recipient {recipient_email}: {refused}"
-                    )
+                    return False, None, f"SMTP server refused recipient: {refused}"
 
-            logger.info(f"[SMTP GMAIL CONFIRMED] Gmail accepted message. Message-ID: {msg['Message-ID']}, Recipient: {recipient_email}")
-            print(f"[SMTP GMAIL CONFIRMED] Gmail accepted message. Message-ID: {msg['Message-ID']}, Recipient: {recipient_email}")
-            return True
-
+            return True, msg["Message-ID"], None
         except smtplib.SMTPAuthenticationError as auth_err:
-            logger.exception(f"[SMTP AUTH ERROR] Gmail authentication failed for {clean_username}: {auth_err}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Gmail SMTP authentication failed for user {clean_username}. Please verify your Gmail App Password. Response: {auth_err}"
-            )
+            return False, None, f"SMTP Authentication failed: {auth_err}"
         except (smtplib.SMTPConnectError, socket.timeout, TimeoutError, OSError) as conn_err:
-            logger.exception(f"[SMTP CONNECT ERROR] Connection failed to {self.smtp_host}:{self.smtp_port}: {conn_err}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Unable to connect to SMTP server ({self.smtp_host}:{self.smtp_port}). Error: {conn_err}"
-            )
-        except HTTPException:
-            raise
+            return False, None, f"SMTP Connection/Timeout error: {conn_err}"
         except Exception as e:
-            logger.exception(f"[SMTP TRANSMISSION ERROR] Delivery error to {recipient_email}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"SMTP transmission error delivering to {recipient_email}: {str(e)}"
-            )
+            return False, None, f"SMTP Unexpected error: {str(e)}"
 
     async def send_otp_email(self, recipient_email: str, user_name: str, otp_code: str) -> bool:
+        """
+        Dispatches OTP email via configured providers in order of priority:
+        1. Brevo HTTP API (Port 443)
+        2. Resend HTTP API (Port 443)
+        3. SendGrid HTTP API (Port 443)
+        4. Standard TLS SMTP
+
+        Safely logs masked recipients and provider statuses without leaking OTPs.
+        Returns True if accepted by a provider, False otherwise. Never swallows errors.
+        """
         safe_name = user_name or "MindMesh User"
-        subject = "MindMesh Login Verification Code"
+        subject = "Verify your MindMesh email"
         text_content = (
             f"Hello {safe_name},\n\n"
             f"Your MindMesh verification code is: {otp_code}\n\n"
             f"This code expires in 5 minutes.\n"
-            f"If you did not request this login, please ignore this email.\n\n"
-            f"Regards,\nMindMesh"
+            f"Do not share this code with anyone.\n\n"
+            f"If you did not request this verification code, please ignore this email.\n\n"
+            f"Regards,\nMindMesh Security Team"
         )
         html_content = self._build_otp_email_html(safe_name, otp_code)
+        masked_dest = mask_email(recipient_email)
 
-        print(f"\n==================================================")
-        print(f"   [OUTBOUND EMAIL DISPATCH]")
-        print(f"   Sender (SMTP): {self.from_email}")
-        print(f"   Recipient (Target User): {recipient_email}")
-        print(f"   Subject: {subject}")
-        print(f"   OTP Code: {otp_code}")
-        print(f"==================================================\n")
+        logger.info(f"[OUTBOUND EMAIL ATTEMPT] Recipient: {masked_dest}, Purpose: Email OTP Verification")
 
-        # 1. Check if RESEND_API_KEY is configured (Uses HTTPS Port 443 - never blocked by Render firewall!)
-        resend_key = (getattr(settings, "RESEND_API_KEY", None) or os.getenv("RESEND_API_KEY", "") or "").strip()
-        if resend_key:
+        # 1. Try Brevo HTTP API (Port 443)
+        if self.brevo_api_key:
+            success, msg_id, err = await self._send_brevo_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: Brevo, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+            logger.warning(f"[EMAIL PROVIDER FAILED] Provider: Brevo, Recipient: {masked_dest}, Reason: {err}")
 
-            try:
-                import httpx
-                payload = {
-                    "from": f"{self.from_name} <onboarding@resend.dev>",
-                    "to": [recipient_email],
-                    "subject": subject,
-                    "html": html_content,
-                    "text": text_content,
-                }
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(
-                        "https://api.resend.com/emails",
-                        headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
-                        json=payload
-                    )
-                    if resp.status_code in (200, 201):
-                        logger.info(f"[RESEND SUCCESS] Delivered OTP email via HTTPS to {recipient_email}")
-                        print(f"[RESEND SUCCESS] Delivered OTP email via HTTPS to {recipient_email}")
-                        return True
-                    else:
-                        logger.warning(f"[RESEND ERROR] Status {resp.status_code}: {resp.text}")
-            except Exception as e:
-                logger.warning(f"[RESEND EXCEPTION] {e}")
+        # 2. Try Resend HTTP API (Port 443)
+        if self.resend_api_key:
+            success, msg_id, err = await self._send_resend_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: Resend, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+            logger.warning(f"[EMAIL PROVIDER FAILED] Provider: Resend, Recipient: {masked_dest}, Reason: {err}")
 
-        # 2. Standard SMTP delivery
-        try:
-            return await asyncio.to_thread(
+        # 3. Try SendGrid HTTP API (Port 443)
+        if self.sendgrid_api_key:
+            success, msg_id, err = await self._send_sendgrid_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: SendGrid, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+            logger.warning(f"[EMAIL PROVIDER FAILED] Provider: SendGrid, Recipient: {masked_dest}, Reason: {err}")
+
+        # 4. Try Standard TLS SMTP
+        if self.smtp_username and self.smtp_password:
+            success, msg_id, err = await asyncio.to_thread(
                 self._send_smtp_sync, recipient_email, subject, text_content, html_content
             )
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: SMTP, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+            logger.warning(f"[EMAIL PROVIDER FAILED] Provider: SMTP, Recipient: {masked_dest}, Reason: {err}")
 
-        except Exception as e:
-            logger.warning(f"[SMTP NOTICE] Outbound SMTP failed ({e}). Fallback OTP logged for user {recipient_email}: {otp_code}")
-            print(f"\n==================================================")
-            print(f"   [OUTBOUND EMAIL NOTICE]")
-            print(f"   Recipient: {recipient_email}")
-            print(f"   OTP Code: {otp_code}")
-            print(f"   Notice: {e}")
-            print(f"==================================================\n")
-            return True
+        # If no provider succeeded, log safe failure and return False (NEVER return True!)
+        logger.error(f"[EMAIL DISPATCH FAILED] Recipient: {masked_dest}. All configured email providers failed to accept message.")
+        return False
+
 
 
 
@@ -383,16 +455,41 @@ class EmailService:
             f"Regards,\nMindMesh"
         )
         html_content = self._build_password_reset_email_html(safe_name, code, token, recipient_email)
+        masked_dest = mask_email(recipient_email)
 
-        print(f"\n==================================================")
-        print(f"   [OUTBOUND PASSWORD RESET EMAIL DISPATCH]")
-        print(f"   Sender (SMTP): {self.from_email}")
-        print(f"   Recipient: {recipient_email}")
-        print(f"   Subject: {subject}")
-        print(f"   Code: {code}")
-        print(f"==================================================\n")
+        logger.info(f"[PASSWORD RESET EMAIL ATTEMPT] Recipient: {masked_dest}")
 
-        return await asyncio.to_thread(
-            self._send_smtp_sync, recipient_email, subject, text_content, html_content
-        )
+        # 1. Try Brevo HTTP API
+        if self.brevo_api_key:
+            success, msg_id, err = await self._send_brevo_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: Brevo, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+
+        # 2. Try Resend HTTP API
+        if self.resend_api_key:
+            success, msg_id, err = await self._send_resend_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: Resend, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+
+        # 3. Try SendGrid HTTP API
+        if self.sendgrid_api_key:
+            success, msg_id, err = await self._send_sendgrid_api(recipient_email, safe_name, subject, text_content, html_content)
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: SendGrid, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+
+        # 4. Try Standard TLS SMTP
+        if self.smtp_username and self.smtp_password:
+            success, msg_id, err = await asyncio.to_thread(
+                self._send_smtp_sync, recipient_email, subject, text_content, html_content
+            )
+            if success:
+                logger.info(f"[EMAIL ACCEPTED] Provider: SMTP, Recipient: {masked_dest}, MessageId: {msg_id}")
+                return True
+
+        logger.error(f"[PASSWORD RESET EMAIL FAILED] Recipient: {masked_dest}. All providers failed.")
+        return False
+
 

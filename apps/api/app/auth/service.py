@@ -180,7 +180,7 @@ class AuthService:
         db.add(new_pending)
         await db.commit()
 
-        # Deliver OTP email via SMTP transport
+        # Deliver OTP email via transport
         transport = EmailOTPTransport()
         sent = await transport.send_otp(
             recipient_identifier=clean_email,
@@ -188,9 +188,12 @@ class AuthService:
             otp_code=plain_otp
         )
         if not sent:
+            # Clean up pending registration so user does not have an orphaned unverified session
+            await db.delete(new_pending)
+            await db.commit()
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to deliver verification code via SMTP to {clean_email}."
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to send verification email. Please check your email configuration or try again later."
             )
 
         return {
@@ -200,8 +203,8 @@ class AuthService:
             "registration_token": registration_token,
             "expires_in_seconds": 300,
             "resend_cooldown_seconds": 60,
-            "preview_otp": plain_otp,
         }
+
 
 
     async def resend_registration_otp(
@@ -255,8 +258,8 @@ class AuthService:
         )
         if not sent:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to deliver verification code to {pending.email}."
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Unable to send verification email to {mask_email(pending.email)}. Please try again later."
             )
 
         return {
@@ -265,8 +268,8 @@ class AuthService:
             "email_masked": mask_email(pending.email),
             "registration_token": registration_token,
             "resend_cooldown_seconds": 60,
-            "preview_otp": plain_otp,
         }
+
 
 
     async def complete_registration(
@@ -309,10 +312,8 @@ class AuthService:
             raise HTTPException(status_code=400, detail="Maximum verification attempts exceeded. Please request a new code.")
 
         input_hash = hashlib.sha256(clean_code.encode("utf-8")).hexdigest()
-        is_valid_otp = (input_hash == pending.otp_hash) or (clean_code == "123456")
-        if not is_valid_otp:
+        if input_hash != pending.otp_hash:
             db.add(pending)
-
             await db.commit()
             attempts_left = max(0, 3 - pending.attempt_count)
             if attempts_left == 0:
@@ -321,6 +322,7 @@ class AuthService:
                 await db.commit()
                 raise HTTPException(status_code=400, detail="Invalid verification code. Maximum attempts reached. Please request a new code.")
             raise HTTPException(status_code=400, detail=f"Invalid verification code. {attempts_left} attempt(s) remaining.")
+
 
         # Re-check uniqueness in case another user registered while OTP window was open
         if await self.repo.get_user_by_email(db, pending.email):
