@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "MindMesh"
     SMTP_FROM_EMAIL: Optional[str] = None
     SMTP_USE_TLS: bool = True
+    RESEND_API_KEY: Optional[str] = None
+
 
     # Documents & Storage configurations
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50 MB
@@ -98,7 +100,8 @@ class Settings(BaseSettings):
         return s
 
 
-    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
+    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "RESEND_API_KEY", mode="before")
+
     @classmethod
     def clean_string_settings(cls, v: Any) -> Any:
         if isinstance(v, str):

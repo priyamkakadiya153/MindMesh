@@ -1,3 +1,4 @@
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -5,6 +6,7 @@ from email.utils import make_msgid, formatdate
 import asyncio
 import secrets
 from datetime import datetime, timedelta
+
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -260,8 +262,9 @@ class EmailService:
         print(f"==================================================\n")
 
         # 1. Check if RESEND_API_KEY is configured (Uses HTTPS Port 443 - never blocked by Render firewall!)
-        resend_key = os.getenv("RESEND_API_KEY")
+        resend_key = (getattr(settings, "RESEND_API_KEY", None) or os.getenv("RESEND_API_KEY", "") or "").strip()
         if resend_key:
+
             try:
                 import httpx
                 payload = {
