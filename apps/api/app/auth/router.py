@@ -18,7 +18,7 @@ from .schemas import (
     TestEmailRequest
 )
 from .dependencies import get_current_user
-from .providers.brevo import mask_email
+from .providers.brevo import mask_email, get_key_prefix
 from .email_service import EmailService
 from ..models.user import User
 from ..models.session import UserSession
@@ -317,8 +317,10 @@ async def get_email_diagnostic_status():
     provider = email_svc.provider
     raw_key = getattr(provider, "api_key", settings.BREVO_API_KEY or "")
     key_present = bool(raw_key)
-    key_prefix = "xkeysib-" if raw_key.startswith("xkeysib-") else ("none" if not raw_key else "other")
+    key_prefix = get_key_prefix(raw_key)
     key_len = len(raw_key)
+    has_mask_chars = any(c in str(raw_key) for c in ("*", "…", "•"))
+    outbound_ip = account_status.get("outbound_ip", "unknown")
 
     return {
         "status": "ok",
@@ -326,11 +328,23 @@ async def get_email_diagnostic_status():
         "brevo_key_present": key_present,
         "brevo_key_prefix": key_prefix,
         "key_length": key_len,
+        "has_mask_characters": has_mask_chars,
+        "outbound_ip": outbound_ip,
         "configured_sender": mask_email(getattr(provider, "from_email", settings.EMAIL_FROM or "")),
         "sender_name": getattr(provider, "from_name", settings.EMAIL_FROM_NAME or "MindMesh"),
         "account_status": account_status,
         "sender_status": sender_status
     }
+
+
+@router.get("/diagnostic/brevo-account")
+async def get_brevo_account_diagnostic():
+    """
+    Direct endpoint testing GET https://api.brevo.com/v3/account with configured BREVO_API_KEY.
+    Reports exact HTTP status and root cause diagnosis (e.g. IP block, masked key, bad key).
+    """
+    email_svc = EmailService()
+    return await email_svc.verify_account_status()
 
 
 @router.post("/diagnostic/test-email")

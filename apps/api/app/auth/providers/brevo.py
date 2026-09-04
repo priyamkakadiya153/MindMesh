@@ -22,6 +22,33 @@ def mask_email(email: str) -> str:
     return f"{masked_user}@{domain}"
 
 
+def get_key_prefix(key: Optional[str]) -> str:
+    """Returns safe key prefix without exposing secrets."""
+    if not key:
+        return "none"
+    s = str(key).strip()
+    if s.startswith("xkeysib-"):
+        return "xkeysib-"
+    if s.startswith("xsmtpsib-"):
+        return "xsmtpsib-"
+    return s[:8] if len(s) >= 8 else "other"
+
+
+async def get_outbound_ip() -> str:
+    """Discovers the public outbound IP of the running server container."""
+    for service_url in ["https://api.ipify.org?format=json", "https://icanhazip.com"]:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(service_url)
+                if resp.status_code == 200:
+                    if "json" in service_url:
+                        return resp.json().get("ip", "unknown")
+                    return resp.text.strip()
+        except Exception:
+            continue
+    return "unknown"
+
+
 class BrevoEmailProvider(BaseEmailProvider):
     """
     Production Email Provider utilizing Brevo (Sendinblue) HTTP REST API over Port 443.
@@ -393,18 +420,27 @@ class BrevoEmailProvider(BaseEmailProvider):
         Safe: Returns HTTP status and account metadata without exposing raw secrets.
         """
         key_present = bool(self.api_key)
-        key_prefix = "xkeysib-" if self.api_key.startswith("xkeysib-") else ("none" if not self.api_key else "other")
+        key_prefix = get_key_prefix(self.api_key)
         key_len = len(self.api_key)
+        has_mask_chars = any(c in self.api_key for c in ("*", "…", "•"))
+        outbound_ip = await get_outbound_ip()
 
         if not self.api_key:
+            logger.error(
+                "provider=brevo action=verify_account status=missing_key present=false prefix=none length=0 outbound_ip=%s",
+                outbound_ip
+            )
             return {
                 "http_status": None,
                 "key_accepted": False,
                 "brevo_key_present": False,
                 "brevo_key_prefix": "none",
                 "key_length": 0,
+                "has_mask_characters": False,
+                "outbound_ip": outbound_ip,
                 "error_category": "missing_api_key",
-                "message": "BREVO_API_KEY is not configured in Render environment."
+                "message": "BREVO_API_KEY is not configured in Render environment.",
+                "actionable_fix": "Add BREVO_API_KEY in Render dashboard under Environment Variables."
             }
 
         headers = {
@@ -423,8 +459,8 @@ class BrevoEmailProvider(BaseEmailProvider):
                 company = data.get("companyName", "")
                 plans = [p.get("type") for p in data.get("plan", []) if isinstance(p, dict)]
                 logger.info(
-                    "provider=brevo action=verify_account status=accepted http_code=200 brevo_key_present=true brevo_key_prefix=%s key_length=%s",
-                    key_prefix, key_len
+                    "provider=brevo action=verify_account status=accepted http_code=200 present=true prefix=%s length=%s outbound_ip=%s",
+                    key_prefix, key_len, outbound_ip
                 )
                 return {
                     "http_status": 200,
@@ -432,6 +468,8 @@ class BrevoEmailProvider(BaseEmailProvider):
                     "brevo_key_present": True,
                     "brevo_key_prefix": key_prefix,
                     "key_length": key_len,
+                    "has_mask_characters": has_mask_chars,
+                    "outbound_ip": outbound_ip,
                     "account_email_masked": mask_email(acc_email),
                     "company_name": company,
                     "plans": plans,
@@ -440,22 +478,52 @@ class BrevoEmailProvider(BaseEmailProvider):
             elif status_code in (401, 403):
                 category = "invalid_api_key" if status_code == 401 else "unauthorized_or_forbidden"
                 logger.error(
-                    "provider=brevo action=verify_account status=rejected http_code=%s brevo_key_present=true brevo_key_prefix=%s key_length=%s",
-                    status_code, key_prefix, key_len
+                    "provider=brevo action=verify_account status=rejected http_code=%s present=true prefix=%s length=%s outbound_ip=%s",
+                    status_code, key_prefix, key_len, outbound_ip
                 )
+
+                if has_mask_chars:
+                    diagnosis = (
+                        "CRITICAL: API key contains mask characters ('*' or dots). "
+                        "You copied the masked key from Brevo settings table instead of the secret when generated. "
+                        "Fix: In Brevo -> SMTP & API -> API Keys -> Generate a new key, and copy it immediately from the modal."
+                    )
+                elif key_prefix == "xsmtpsib-":
+                    diagnosis = (
+                        "CRITICAL: Key prefix is 'xsmtpsib-'. This is an SMTP key, NOT a REST API v3 key. "
+                        "Fix: In Brevo, go to 'API Keys' tab and generate an API key (starts with 'xkeysib-')."
+                    )
+                elif key_len < 60:
+                    diagnosis = (
+                        f"CRITICAL: Key length is only {key_len} characters (expected 72-76). The key is incomplete or truncated. "
+                        "Fix: Generate a new API key in Brevo and copy the full string."
+                    )
+                else:
+                    diagnosis = (
+                        f"Brevo returned HTTP {status_code} ({resp.text[:120]}). "
+                        f"Most likely causes: "
+                        f"(1) Brevo IP Security: 'Authorised IP addresses are blocked for your API keys' is active in Brevo. "
+                        f"Render uses dynamic IPs (outbound IP: {outbound_ip}). "
+                        f"Fix: In Brevo, go to Account Profile -> Security -> Authorised IPs, and disable IP restriction (or authorize {outbound_ip}). "
+                        f"(2) The key was revoked or mistyped. Generate a new API key."
+                    )
+
                 return {
                     "http_status": status_code,
                     "key_accepted": False,
                     "brevo_key_present": True,
                     "brevo_key_prefix": key_prefix,
                     "key_length": key_len,
+                    "has_mask_characters": has_mask_chars,
+                    "outbound_ip": outbound_ip,
                     "error_category": category,
-                    "message": f"Brevo rejected API key with HTTP {status_code} ({resp.text[:200]})."
+                    "message": f"Brevo rejected API key with HTTP {status_code}: {resp.text[:120]}",
+                    "diagnosis": diagnosis
                 }
             else:
                 logger.error(
-                    "provider=brevo action=verify_account status=error http_code=%s brevo_key_present=true brevo_key_prefix=%s key_length=%s",
-                    status_code, key_prefix, key_len
+                    "provider=brevo action=verify_account status=error http_code=%s present=true prefix=%s length=%s outbound_ip=%s",
+                    status_code, key_prefix, key_len, outbound_ip
                 )
                 return {
                     "http_status": status_code,
@@ -463,13 +531,15 @@ class BrevoEmailProvider(BaseEmailProvider):
                     "brevo_key_present": True,
                     "brevo_key_prefix": key_prefix,
                     "key_length": key_len,
+                    "has_mask_characters": has_mask_chars,
+                    "outbound_ip": outbound_ip,
                     "error_category": "brevo_api_error",
-                    "message": f"Brevo account endpoint returned HTTP {status_code}: {resp.text[:200]}"
+                    "message": f"Brevo account endpoint returned HTTP {status_code}: {resp.text[:120]}"
                 }
         except Exception as e:
             logger.error(
-                "provider=brevo action=verify_account status=failed error_category=network_error error=%s",
-                str(e)
+                "provider=brevo action=verify_account status=failed error_category=network_error error=%s present=true prefix=%s length=%s",
+                str(e), key_prefix, key_len
             )
             return {
                 "http_status": None,
@@ -477,6 +547,8 @@ class BrevoEmailProvider(BaseEmailProvider):
                 "brevo_key_present": True,
                 "brevo_key_prefix": key_prefix,
                 "key_length": key_len,
+                "has_mask_characters": has_mask_chars,
+                "outbound_ip": outbound_ip,
                 "error_category": "network_error",
                 "message": f"Network error connecting to Brevo: {str(e)}"
             }
