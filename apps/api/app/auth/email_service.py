@@ -91,6 +91,12 @@ class EmailVerificationService:
 
         return user
 
+    async def verify_sender_status(self) -> dict:
+        return await EmailService().verify_sender_status()
+
+    async def verify_account_status(self) -> dict:
+        return await EmailService().verify_account_status()
+
 
 import socket
 
@@ -130,26 +136,11 @@ class EmailService:
         Dispatches verification OTP email and returns structured EmailDeliveryResult
         with error categorization.
         """
-        result = await self.provider.send_verification_email(
+        return await self.provider.send_verification_email(
             recipient_email=recipient_email,
             recipient_name=user_name,
             otp_code=otp_code
         )
-
-        # If primary provider failed and fallback SMTP is available (and not already tried), try SMTP fallback
-        if not result.success and result.provider == "brevo" and settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-            logger.info("provider=brevo failed; attempting SMTP fallback for %s...", mask_email(recipient_email))
-            from .providers.smtp import SMTPEmailProvider
-            smtp_provider = SMTPEmailProvider()
-            fallback_res = await smtp_provider.send_verification_email(
-                recipient_email=recipient_email,
-                recipient_name=user_name,
-                otp_code=otp_code
-            )
-            if fallback_res.success:
-                return fallback_res
-
-        return result
 
     async def send_otp_email(self, recipient_email: str, user_name: str, otp_code: str) -> bool:
         """Standard boolean method for OTP transport delivery."""
@@ -169,6 +160,10 @@ class EmailService:
     async def verify_sender_status(self) -> dict:
         """Checks configuration readiness and sender authorization with the active provider."""
         return await self.provider.verify_sender_status()
+
+    async def verify_account_status(self) -> dict:
+        """Checks API key authorization directly with provider."""
+        return await self.provider.verify_account_status()
 
 
 

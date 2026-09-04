@@ -128,3 +128,10 @@ class SMTPEmailProvider(BaseEmailProvider):
             "configured_sender": self.from_email,
             "provider": "smtp"
         }
+
+    async def verify_account_status(self) -> Dict[str, Any]:
+        return {
+            "provider": "smtp",
+            "key_accepted": bool(self.username and self.password),
+            "message": "SMTP provider is configured."
+        }

@@ -41,3 +41,8 @@ class BaseEmailProvider(ABC):
     async def verify_sender_status(self) -> Dict[str, Any]:
         """Validates provider credentials and checks whether the configured sender is authorized."""
         pass
+
+    @abstractmethod
+    async def verify_account_status(self) -> Dict[str, Any]:
+        """Diagnostic check verifying whether account credentials/API keys are accepted."""
+        pass

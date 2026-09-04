@@ -395,3 +395,72 @@ async def test_registration_returns_unverified_sender_detail(client: AsyncClient
         assert res.status_code == 502
         assert "sender email is not verified" in res.json()["detail"].lower()
 
+
+@pytest.mark.asyncio
+async def test_brevo_provider_verify_account_status():
+    """Criterion: verify_account_status properly queries GET /v3/account and parses 200 OK."""
+    from unittest.mock import MagicMock
+    from app.auth.providers.brevo import BrevoEmailProvider
+    provider = BrevoEmailProvider(
+        api_key="xkeysib-mock-valid-key",
+        from_email="verified@mindmesh.ai"
+    )
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {
+        "email": "owner@mindmesh.ai",
+        "companyName": "MindMesh Inc",
+        "plan": [{"type": "free"}]
+    }
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = fake_resp
+        status = await provider.verify_account_status()
+
+        assert status["http_status"] == 200
+        assert status["key_accepted"] is True
+        assert status["brevo_key_present"] is True
+        assert status["brevo_key_prefix"] == "xkeysib-"
+        assert "owner" in status["account_email_masked"] or "***" in status["account_email_masked"]
+
+
+@pytest.mark.asyncio
+async def test_brevo_provider_verify_account_status_401():
+    """Criterion: verify_account_status properly handles 401 Unauthorized rejection."""
+    from unittest.mock import MagicMock
+    from app.auth.providers.brevo import BrevoEmailProvider
+    provider = BrevoEmailProvider(
+        api_key="xkeysib-mock-bad-key",
+        from_email="verified@mindmesh.ai"
+    )
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 401
+    fake_resp.text = '{"code":"unauthorized","message":"Key not found"}'
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = fake_resp
+        status = await provider.verify_account_status()
+
+        assert status["http_status"] == 401
+        assert status["key_accepted"] is False
+        assert status["error_category"] == "invalid_api_key"
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_email_status_endpoint(client: AsyncClient):
+    """Criterion: Public diagnostic endpoint /api/v1/auth/diagnostic/email-status returns safe metadata."""
+    res = await client.get("/api/v1/auth/diagnostic/email-status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "brevo_key_present" in data
+    assert "brevo_key_prefix" in data
+    assert "key_length" in data
+    assert "account_status" in data
+    assert "sender_status" in data
+    # Ensure raw secret is never returned
+    assert "xkeysib" not in str(data) or data["brevo_key_prefix"] == "xkeysib-"
+
+

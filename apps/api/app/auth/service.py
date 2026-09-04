@@ -192,10 +192,20 @@ class AuthService:
             await db.delete(new_pending)
             await db.commit()
             res = getattr(transport, "last_delivery_result", None)
-            if res and res.error_category == "unverified_sender":
+            if res and res.error_category == "missing_api_key":
+                msg = "Email delivery failed: BREVO_API_KEY is not configured in Render. Please add BREVO_API_KEY in Render settings."
+            elif res and res.error_category == "invalid_api_key":
+                msg = "Email delivery failed: Brevo rejected BREVO_API_KEY (HTTP 401 Unauthorized - Key not found). Please check your API key in Brevo."
+            elif res and res.error_category == "unauthorized_or_forbidden":
+                msg = "Email delivery failed: Brevo account access forbidden (HTTP 403 Forbidden). Please check your Brevo account status and permissions."
+            elif res and res.error_category == "missing_sender":
+                msg = "Email delivery failed: EMAIL_FROM is not configured in Render. Please set EMAIL_FROM in Render settings."
+            elif res and res.error_category == "unverified_sender":
                 msg = "Email delivery failed: Sender email is not verified in Brevo. Please check EMAIL_FROM in Render settings."
-            elif res and res.error_category in ("missing_api_key", "invalid_api_key"):
-                msg = "Email delivery failed: Brevo API key is missing or invalid. Please check BREVO_API_KEY in Render settings."
+            elif res and res.error_category == "rate_limited":
+                msg = "Email delivery failed: Brevo rate limit exceeded. Please try again later."
+            elif res and res.error_category == "network_timeout":
+                msg = "Email delivery failed: Network timeout connecting to Brevo API. Please try again."
             else:
                 msg = "Unable to send verification email. Please check your email configuration or try again later."
             raise HTTPException(
@@ -265,10 +275,20 @@ class AuthService:
         )
         if not sent:
             res = getattr(transport, "last_delivery_result", None)
-            if res and res.error_category == "unverified_sender":
+            if res and res.error_category == "missing_api_key":
+                msg = "Email delivery failed: BREVO_API_KEY is not configured in Render. Please add BREVO_API_KEY in Render settings."
+            elif res and res.error_category == "invalid_api_key":
+                msg = "Email delivery failed: Brevo rejected BREVO_API_KEY (HTTP 401 Unauthorized - Key not found). Please check your API key in Brevo."
+            elif res and res.error_category == "unauthorized_or_forbidden":
+                msg = "Email delivery failed: Brevo account access forbidden (HTTP 403 Forbidden). Please check your Brevo account status and permissions."
+            elif res and res.error_category == "missing_sender":
+                msg = "Email delivery failed: EMAIL_FROM is not configured in Render. Please set EMAIL_FROM in Render settings."
+            elif res and res.error_category == "unverified_sender":
                 msg = "Email delivery failed: Sender email is not verified in Brevo. Please check EMAIL_FROM in Render settings."
-            elif res and res.error_category in ("missing_api_key", "invalid_api_key"):
-                msg = "Email delivery failed: Brevo API key is missing or invalid. Please check BREVO_API_KEY in Render settings."
+            elif res and res.error_category == "rate_limited":
+                msg = "Email delivery failed: Brevo rate limit exceeded. Please try again later."
+            elif res and res.error_category == "network_timeout":
+                msg = "Email delivery failed: Network timeout connecting to Brevo API. Please try again."
             else:
                 msg = f"Unable to send verification email to {mask_email(pending.email)}. Please try again later."
             raise HTTPException(

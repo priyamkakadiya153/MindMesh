@@ -4,6 +4,7 @@ from urllib.parse import quote_plus, unquote
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import sys
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 ROOT_ENV = BASE_DIR / ".env"
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=existing_env_files,
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        case_sensitive=False,
         extra="ignore"
     )
 
@@ -126,6 +127,35 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
+        # Direct fallback checks on os.environ in case environment variable was passed with unexpected casing
+        if not self.BREVO_API_KEY:
+            for k in ["BREVO_API_KEY", "brevo_api_key", "SENDINBLUE_API_KEY", "sendinblue_api_key"]:
+                val = os.environ.get(k)
+                if val and val.strip():
+                    self.BREVO_API_KEY = val.strip().strip('\'"\\').strip()
+                    break
+
+        if not self.EMAIL_FROM:
+            for k in ["EMAIL_FROM", "email_from", "SMTP_FROM_EMAIL", "smtp_from_email", "SMTP_USERNAME", "smtp_username"]:
+                val = os.environ.get(k)
+                if val and val.strip():
+                    self.EMAIL_FROM = val.strip().strip('\'"\\').strip()
+                    break
+
+        if not self.EMAIL_FROM_NAME:
+            for k in ["EMAIL_FROM_NAME", "email_from_name", "SMTP_FROM_NAME", "smtp_from_name"]:
+                val = os.environ.get(k)
+                if val and val.strip():
+                    self.EMAIL_FROM_NAME = val.strip().strip('\'"\\').strip()
+                    break
+
+        if not self.EMAIL_PROVIDER:
+            for k in ["EMAIL_PROVIDER", "email_provider"]:
+                val = os.environ.get(k)
+                if val and val.strip():
+                    self.EMAIL_PROVIDER = val.strip().strip('\'"\\').strip().lower()
+                    break
+
         # Harmonize EMAIL_FROM with SMTP_FROM_EMAIL and SMTP_USERNAME
         if not self.EMAIL_FROM:
             self.EMAIL_FROM = self.SMTP_FROM_EMAIL or self.SMTP_USERNAME
@@ -148,6 +178,8 @@ class Settings(BaseSettings):
         pass_ok = bool(self.SMTP_PASSWORD and self.SMTP_PASSWORD.strip())
         from_ok = bool(self.EMAIL_FROM and self.EMAIL_FROM.strip())
         brevo_ok = bool(self.BREVO_API_KEY and self.BREVO_API_KEY.strip())
+        brevo_prefix = "xkeysib-" if (self.BREVO_API_KEY and self.BREVO_API_KEY.startswith("xkeysib-")) else ("none" if not brevo_ok else "other")
+        brevo_len = len(self.BREVO_API_KEY or "")
         has_http_email = bool(brevo_ok or self.RESEND_API_KEY or self.SENDGRID_API_KEY)
 
         # Mask database URL for clean logging
@@ -174,7 +206,7 @@ class Settings(BaseSettings):
         print(f"   [OK] REDIS_URL: {masked_redis}")
         print(f"   [OK] GEMINI_API_KEY present: {bool(self.GEMINI_API_KEY)}")
         print(f"   [OK] EMAIL_PROVIDER: {self.EMAIL_PROVIDER}")
-        print(f"   [OK] BREVO_API_KEY present: {brevo_ok}")
+        print(f"   [OK] BREVO_API_KEY present: {brevo_ok} (prefix={brevo_prefix}, length={brevo_len})")
         print(f"   [OK] EMAIL_FROM: {self.EMAIL_FROM}")
         print(f"   [OK] EMAIL_FROM_NAME: {self.EMAIL_FROM_NAME}")
         print(f"   [OK] RESEND_API_KEY present: {bool(self.RESEND_API_KEY)}")

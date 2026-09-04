@@ -19,6 +19,7 @@ from .schemas import (
 )
 from .dependencies import get_current_user
 from .providers.brevo import mask_email
+from .email_service import EmailService
 from ..models.user import User
 from ..models.session import UserSession
 from ..models.organization import Organization
@@ -299,23 +300,36 @@ async def verify_phone_otp(request: Request, response: Response, body: PhoneVeri
     }
 
 
-# --- Safe Diagnostic Endpoints (Requires Authenticated Session) ---
+# --- Safe Diagnostic Endpoints ---
 
 @router.get("/diagnostic/email-status")
-async def get_email_diagnostic_status(
-    current_user: User = Depends(get_current_user)
-):
+async def get_email_diagnostic_status():
     """
-    Diagnostic route checking active email provider configuration and Brevo sender authorization.
+    Public safe diagnostic route checking active email provider configuration,
+    Brevo API key verification (GET https://api.brevo.com/v3/account),
+    and sender authorization (GET https://api.brevo.com/v3/senders).
     Never exposes raw secrets or keys.
     """
-    status_info = await auth_service.email_service.verify_sender_status()
+    email_svc = EmailService()
+    account_status = await email_svc.verify_account_status()
+    sender_status = await email_svc.verify_sender_status()
+
+    provider = email_svc.provider
+    raw_key = getattr(provider, "api_key", settings.BREVO_API_KEY or "")
+    key_present = bool(raw_key)
+    key_prefix = "xkeysib-" if raw_key.startswith("xkeysib-") else ("none" if not raw_key else "other")
+    key_len = len(raw_key)
+
     return {
         "status": "ok",
         "provider": settings.EMAIL_PROVIDER,
-        "configured_sender": mask_email(settings.EMAIL_FROM),
-        "sender_name": settings.EMAIL_FROM_NAME,
-        "details": status_info
+        "brevo_key_present": key_present,
+        "brevo_key_prefix": key_prefix,
+        "key_length": key_len,
+        "configured_sender": mask_email(getattr(provider, "from_email", settings.EMAIL_FROM or "")),
+        "sender_name": getattr(provider, "from_name", settings.EMAIL_FROM_NAME or "MindMesh"),
+        "account_status": account_status,
+        "sender_status": sender_status
     }
 
 
@@ -329,7 +343,8 @@ async def send_diagnostic_test_email(
     Only accessible to authenticated users.
     """
     target = (body.target_email or current_user.email).strip()
-    result = await auth_service.email_service.send_otp_email_detailed(
+    email_svc = EmailService()
+    result = await email_svc.send_otp_email_detailed(
         recipient_email=target,
         user_name=f"{current_user.first_name} {current_user.last_name}".strip() or current_user.username,
         otp_code="987654"
