@@ -38,7 +38,14 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: Optional[str] = None
     FIREBASE_PROJECT_ID: Optional[str] = None
 
-    # SMTP Configuration
+    # Email Provider Configuration
+    EMAIL_PROVIDER: Optional[str] = None
+    EMAIL_FROM: Optional[str] = None
+    EMAIL_FROM_NAME: str = "MindMesh"
+    BREVO_API_KEY: Optional[str] = None
+
+
+    # SMTP Configuration (Fallback / Local Dev)
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USERNAME: Optional[str] = None
@@ -48,8 +55,8 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     RESEND_API_KEY: Optional[str] = None
     RESEND_FROM_EMAIL: Optional[str] = None
-    BREVO_API_KEY: Optional[str] = None
     SENDGRID_API_KEY: Optional[str] = None
+
 
 
 
@@ -104,12 +111,34 @@ class Settings(BaseSettings):
         return s
 
 
-    @field_validator("JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "RESEND_API_KEY", "RESEND_FROM_EMAIL", "BREVO_API_KEY", "SENDGRID_API_KEY", mode="before")
+    @field_validator(
+        "JWT_SECRET", "JWT_REFRESH_SECRET", "GEMINI_API_KEY",
+        "EMAIL_PROVIDER", "EMAIL_FROM", "EMAIL_FROM_NAME",
+        "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "SMTP_FROM_NAME",
+        "RESEND_API_KEY", "RESEND_FROM_EMAIL", "BREVO_API_KEY", "SENDGRID_API_KEY",
+        mode="before"
+    )
     @classmethod
     def clean_string_settings(cls, v: Any) -> Any:
         if isinstance(v, str):
             return v.strip().strip('\'"\\').strip()
         return v
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        # Harmonize EMAIL_FROM with SMTP_FROM_EMAIL and SMTP_USERNAME
+        if not self.EMAIL_FROM:
+            self.EMAIL_FROM = self.SMTP_FROM_EMAIL or self.SMTP_USERNAME
+        if not self.SMTP_FROM_EMAIL and self.EMAIL_FROM:
+            self.SMTP_FROM_EMAIL = self.EMAIL_FROM
+        if not self.EMAIL_FROM_NAME:
+            self.EMAIL_FROM_NAME = self.SMTP_FROM_NAME or "MindMesh"
+        if not self.SMTP_FROM_NAME and self.EMAIL_FROM_NAME:
+            self.SMTP_FROM_NAME = self.EMAIL_FROM_NAME
+
+        # If EMAIL_PROVIDER is not set, default to brevo if BREVO_API_KEY is present, else smtp
+        if not self.EMAIL_PROVIDER or not self.EMAIL_PROVIDER.strip():
+            self.EMAIL_PROVIDER = "brevo" if self.BREVO_API_KEY else "smtp"
 
     def validate_startup_config(self) -> None:
         """Verifies required settings at startup and logs loaded configuration with passwords masked."""
@@ -117,8 +146,9 @@ class Settings(BaseSettings):
         port_ok = bool(self.SMTP_PORT)
         user_ok = bool(self.SMTP_USERNAME and self.SMTP_USERNAME.strip())
         pass_ok = bool(self.SMTP_PASSWORD and self.SMTP_PASSWORD.strip())
-        from_ok = bool(self.SMTP_FROM_EMAIL and self.SMTP_FROM_EMAIL.strip())
-        has_http_email = bool(self.BREVO_API_KEY or self.RESEND_API_KEY or self.SENDGRID_API_KEY)
+        from_ok = bool(self.EMAIL_FROM and self.EMAIL_FROM.strip())
+        brevo_ok = bool(self.BREVO_API_KEY and self.BREVO_API_KEY.strip())
+        has_http_email = bool(brevo_ok or self.RESEND_API_KEY or self.SENDGRID_API_KEY)
 
         # Mask database URL for clean logging
         masked_db = self.DATABASE_URL
@@ -143,30 +173,40 @@ class Settings(BaseSettings):
         print(f"   [OK] DATABASE_URL: {masked_db}")
         print(f"   [OK] REDIS_URL: {masked_redis}")
         print(f"   [OK] GEMINI_API_KEY present: {bool(self.GEMINI_API_KEY)}")
-        print(f"   [OK] BREVO_API_KEY present: {bool(self.BREVO_API_KEY)}")
+        print(f"   [OK] EMAIL_PROVIDER: {self.EMAIL_PROVIDER}")
+        print(f"   [OK] BREVO_API_KEY present: {brevo_ok}")
+        print(f"   [OK] EMAIL_FROM: {self.EMAIL_FROM}")
+        print(f"   [OK] EMAIL_FROM_NAME: {self.EMAIL_FROM_NAME}")
         print(f"   [OK] RESEND_API_KEY present: {bool(self.RESEND_API_KEY)}")
         print(f"   [OK] SENDGRID_API_KEY present: {bool(self.SENDGRID_API_KEY)}")
         print(f"   [OK] SMTP_HOST: {self.SMTP_HOST}:{self.SMTP_PORT}")
-        print(f"   [OK] SMTP_USERNAME: {self.SMTP_USERNAME}")
-        print(f"   [OK] SMTP_FROM_EMAIL: {self.SMTP_FROM_EMAIL}")
         print(f"==================================================\n")
 
         missing = []
-        if not (has_http_email or (user_ok and pass_ok)):
+        if self.EMAIL_PROVIDER.lower() == "brevo":
+            if not brevo_ok:
+                missing.append("BREVO_API_KEY (required when EMAIL_PROVIDER=brevo)")
+            if not from_ok:
+                missing.append("EMAIL_FROM (must be a verified sender in Brevo, e.g. priyamakakadiya@gmail.com)")
+        elif self.EMAIL_PROVIDER.lower() == "smtp":
             if not user_ok:
-                missing.append("SMTP_USERNAME (or BREVO_API_KEY / RESEND_API_KEY)")
+                missing.append("SMTP_USERNAME")
             if not pass_ok:
                 missing.append("SMTP_PASSWORD")
             if not from_ok:
-                missing.append("SMTP_FROM_EMAIL")
+                missing.append("EMAIL_FROM (or SMTP_FROM_EMAIL)")
+        else:
+            if not (has_http_email or (user_ok and pass_ok)):
+                missing.append("Valid email provider credentials (BREVO_API_KEY or SMTP)")
 
         if missing:
             err_msg = (
                 f"[CRITICAL CONFIG ERROR] Missing required email delivery configuration: {', '.join(missing)}. "
-                f"Please ensure either SMTP credentials or an HTTP email provider API key is set."
+                f"Please ensure either Brevo API credentials (BREVO_API_KEY and EMAIL_FROM) or SMTP credentials are set."
             )
             print(f"\n{err_msg}\n", file=sys.stderr)
             raise RuntimeError(err_msg)
+
 
 settings = Settings()
 settings.validate_startup_config()

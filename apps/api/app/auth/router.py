@@ -14,9 +14,11 @@ from .schemas import (
     SendEmailVerificationRequest, VerifyEmailRequest,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
     PhoneSendOtpRequest, PhoneVerifyOtpRequest, PhoneSendOtpResponse,
-    RegisterSendOtpResponse, RegisterResendOtpRequest, RegisterVerifyOtpRequest
+    RegisterSendOtpResponse, RegisterResendOtpRequest, RegisterVerifyOtpRequest,
+    TestEmailRequest
 )
 from .dependencies import get_current_user
+from .providers.brevo import mask_email
 from ..models.user import User
 from ..models.session import UserSession
 from ..models.organization import Organization
@@ -295,4 +297,50 @@ async def verify_phone_otp(request: Request, response: Response, body: PhoneVeri
         "token_type": res["token_type"],
         "user": res["user"]
     }
+
+
+# --- Safe Diagnostic Endpoints (Requires Authenticated Session) ---
+
+@router.get("/diagnostic/email-status")
+async def get_email_diagnostic_status(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Diagnostic route checking active email provider configuration and Brevo sender authorization.
+    Never exposes raw secrets or keys.
+    """
+    status_info = await auth_service.email_service.verify_sender_status()
+    return {
+        "status": "ok",
+        "provider": settings.EMAIL_PROVIDER,
+        "configured_sender": mask_email(settings.EMAIL_FROM),
+        "sender_name": settings.EMAIL_FROM_NAME,
+        "details": status_info
+    }
+
+
+@router.post("/diagnostic/test-email")
+async def send_diagnostic_test_email(
+    body: TestEmailRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Diagnostic route sending a test verification email to verify Brevo integration.
+    Only accessible to authenticated users.
+    """
+    target = (body.target_email or current_user.email).strip()
+    result = await auth_service.email_service.send_otp_email_detailed(
+        recipient_email=target,
+        user_name=f"{current_user.first_name} {current_user.last_name}".strip() or current_user.username,
+        otp_code="987654"
+    )
+    return {
+        "success": result.success,
+        "provider": result.provider,
+        "recipient": mask_email(target),
+        "message_id": result.message_id,
+        "error_category": result.error_category,
+        "error_message": result.error_message
+    }
+
 

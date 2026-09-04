@@ -293,3 +293,105 @@ async def test_delivery_failure_reports_clear_error(client: AsyncClient):
         res = await client.post("/api/v1/auth/register", json=user_payload)
         assert res.status_code == 502
         assert "unable to send verification email" in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_brevo_provider_send_success():
+    """Criterion: BrevoEmailProvider properly handles 201 Created response."""
+    from app.auth.providers.brevo import BrevoEmailProvider
+    provider = BrevoEmailProvider(
+        api_key="mock_brevo_key",
+        from_email="verified@mindmesh.ai",
+        from_name="MindMesh"
+    )
+
+    from unittest.mock import MagicMock
+    fake_response = MagicMock()
+    fake_response.status_code = 201
+    fake_response.json.return_value = {"messageId": "<brevo_msg_12345>"}
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        res = await provider.send_verification_email("user@gmail.com", "Test User", "654321")
+
+        assert res.success is True
+        assert res.provider == "brevo"
+        assert res.message_id == "<brevo_msg_12345>"
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args[1]
+        assert call_kwargs["headers"]["api-key"] == "mock_brevo_key"
+        assert call_kwargs["json"]["sender"]["email"] == "verified@mindmesh.ai"
+        assert call_kwargs["json"]["to"][0]["email"] == "user@gmail.com"
+
+
+@pytest.mark.asyncio
+async def test_brevo_provider_unverified_sender():
+    """Criterion: BrevoEmailProvider categorizes 400 sender error properly."""
+    from app.auth.providers.brevo import BrevoEmailProvider
+    provider = BrevoEmailProvider(
+        api_key="mock_brevo_key",
+        from_email="unverified@mindmesh.ai",
+        from_name="MindMesh"
+    )
+
+    fake_response = AsyncMock()
+    fake_response.status_code = 400
+    fake_response.text = '{"code":"invalid_parameter","message":"Sender email is not valid or not verified on Brevo"}'
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        res = await provider.send_verification_email("user@gmail.com", "Test User", "654321")
+
+        assert res.success is False
+        assert res.error_category == "unverified_sender"
+        assert "not registered or verified" in res.error_message
+
+
+@pytest.mark.asyncio
+async def test_brevo_provider_invalid_api_key():
+    """Criterion: BrevoEmailProvider categorizes 401 Unauthorized properly."""
+    from app.auth.providers.brevo import BrevoEmailProvider
+    provider = BrevoEmailProvider(
+        api_key="bad_key",
+        from_email="sender@mindmesh.ai"
+    )
+
+    fake_response = AsyncMock()
+    fake_response.status_code = 401
+    fake_response.text = '{"code":"unauthorized","message":"Key not found"}'
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        res = await provider.send_verification_email("user@gmail.com", "Test User", "654321")
+
+        assert res.success is False
+        assert res.error_category == "invalid_api_key"
+
+
+@pytest.mark.asyncio
+async def test_registration_returns_unverified_sender_detail(client: AsyncClient):
+    """Criterion: If Brevo returns unverified sender error, user sees clear configuration message."""
+    from app.auth.providers.base import EmailDeliveryResult
+    ts = int(time.time() * 1000)
+    user_payload = {
+        "email": f"unverified_sender_{ts}@mindmesh.com",
+        "password": "Password123!",
+        "phone_number": f"+9198{ts % 100000000:08d}",
+        "first_name": "Unverified",
+        "last_name": "Sender"
+    }
+
+    async def fake_send_otp(self, recipient_identifier="", recipient_name="", otp_code=""):
+        self.last_delivery_result = EmailDeliveryResult(
+            success=False,
+            provider="brevo",
+            error_category="unverified_sender",
+            error_message="Sender email is not valid or not verified on Brevo"
+        )
+        return False
+
+    with patch("app.auth.service.EmailOTPTransport.send_otp", fake_send_otp):
+        res = await client.post("/api/v1/auth/register", json=user_payload)
+        assert res.status_code == 502
+        assert "sender email is not verified" in res.json()["detail"].lower()
+

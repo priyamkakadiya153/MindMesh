@@ -191,9 +191,16 @@ class AuthService:
             # Clean up pending registration so user does not have an orphaned unverified session
             await db.delete(new_pending)
             await db.commit()
+            res = getattr(transport, "last_delivery_result", None)
+            if res and res.error_category == "unverified_sender":
+                msg = "Email delivery failed: Sender email is not verified in Brevo. Please check EMAIL_FROM in Render settings."
+            elif res and res.error_category in ("missing_api_key", "invalid_api_key"):
+                msg = "Email delivery failed: Brevo API key is missing or invalid. Please check BREVO_API_KEY in Render settings."
+            else:
+                msg = "Unable to send verification email. Please check your email configuration or try again later."
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Unable to send verification email. Please check your email configuration or try again later."
+                detail=msg
             )
 
         return {
@@ -232,7 +239,7 @@ class AuthService:
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Registration session has expired. Please fill out the registration form again."
+                detail="Registration session has expired. Please start registration again."
             )
 
         time_since_creation = (now - pending.updated_at).total_seconds()
@@ -257,9 +264,16 @@ class AuthService:
             otp_code=plain_otp
         )
         if not sent:
+            res = getattr(transport, "last_delivery_result", None)
+            if res and res.error_category == "unverified_sender":
+                msg = "Email delivery failed: Sender email is not verified in Brevo. Please check EMAIL_FROM in Render settings."
+            elif res and res.error_category in ("missing_api_key", "invalid_api_key"):
+                msg = "Email delivery failed: Brevo API key is missing or invalid. Please check BREVO_API_KEY in Render settings."
+            else:
+                msg = f"Unable to send verification email to {mask_email(pending.email)}. Please try again later."
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Unable to send verification email to {mask_email(pending.email)}. Please try again later."
+                detail=msg
             )
 
         return {

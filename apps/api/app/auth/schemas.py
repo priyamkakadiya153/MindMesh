@@ -132,3 +132,6 @@ class ActiveSessionResponse(BaseModel):
     expires_at: Optional[datetime] = None
     is_current: bool = False
 
+class TestEmailRequest(BaseModel):
+    target_email: Optional[str] = None
+
