@@ -1,12 +1,4 @@
-const API_BASE_URL = '/api/v1';
-
-function getAuthHeaders(token?: string) {
-  const authToken = token || localStorage.getItem('token') || '';
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${authToken}`
-  };
-}
+import { apiClient } from '../../lib/api-client';
 
 export interface NotificationItem {
   id: string;
@@ -33,8 +25,8 @@ export interface UserInvitationItem {
   id: string;
   organization_id: string;
   org_name?: string;
-  email: str;
-  role: str;
+  email: string;
+  role: string;
   token: string;
   invited_by?: string;
   status: string;
@@ -55,11 +47,8 @@ export interface ActivityItem {
 }
 
 export async function getNotifications(token?: string): Promise<NotificationsResponse> {
-  const res = await fetch(`${API_BASE_URL}/notifications`, {
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) throw new Error('Failed to fetch notifications');
-  const data = await res.json();
+  const res = await apiClient.get('/notifications');
+  const data = res.data;
   if (Array.isArray(data)) {
     const unread = data.filter((n: any) => !n.is_read).length;
     return { unread_count: unread, notifications: data };
@@ -68,68 +57,41 @@ export async function getNotifications(token?: string): Promise<NotificationsRes
 }
 
 export async function markNotificationRead(id: string, token?: string) {
-  const res = await fetch(`${API_BASE_URL}/notifications/${id}/read`, {
-    method: 'PATCH',
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) throw new Error('Failed to mark notification read');
-  return res.json();
+  const res = await apiClient.patch(`/notifications/${id}/read`);
+  return res.data;
 }
 
 export async function markAllNotificationsRead(token?: string) {
-  const res = await fetch(`${API_BASE_URL}/notifications/read-all`, {
-    method: 'PATCH',
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) throw new Error('Failed to mark all read');
-  return res.json();
+  const res = await apiClient.patch('/notifications/read-all');
+  return res.data;
 }
 
 export async function deleteNotification(id: string, token?: string) {
-  const res = await fetch(`${API_BASE_URL}/notifications/${id}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) throw new Error('Failed to delete notification');
-  return res.json();
+  const res = await apiClient.delete(`/notifications/${id}`);
+  return res.data;
 }
 
 export async function getUserInvitations(token?: string): Promise<UserInvitationItem[]> {
-  const res = await fetch(`${API_BASE_URL}/invitations/my`, {
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) throw new Error('Failed to fetch invitations');
-  return res.json();
+  const res = await apiClient.get('/invitations/my');
+  return res.data;
 }
 
 export async function acceptUserInvitation(idOrToken: string, token?: string) {
-  const res = await fetch(`${API_BASE_URL}/invitations/${idOrToken}/accept`, {
-    method: 'POST',
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Failed to accept invitation' }));
-    throw new Error(err.detail || 'Failed to accept invitation');
-  }
-  return res.json();
+  const res = await apiClient.post(`/invitations/${idOrToken}/accept`);
+  return res.data;
 }
 
 export async function declineUserInvitation(idOrToken: string, token?: string) {
-  const res = await fetch(`${API_BASE_URL}/invitations/${idOrToken}/decline`, {
-    method: 'POST',
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Failed to decline invitation' }));
-    throw new Error(err.detail || 'Failed to decline invitation');
-  }
-  return res.json();
+  const res = await apiClient.post(`/invitations/${idOrToken}/decline`);
+  return res.data;
 }
 
 export async function getActivityFeed(organizationId: string, token?: string): Promise<ActivityItem[]> {
-  const res = await fetch(`${API_BASE_URL}/notifications/activity?organization_id=${organizationId}`, {
-    headers: getAuthHeaders(token)
-  });
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    const res = await apiClient.get(`/notifications/activity?organization_id=${organizationId}`);
+    return res.data;
+  } catch {
+    return [];
+  }
 }
+

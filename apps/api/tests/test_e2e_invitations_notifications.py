@@ -32,12 +32,16 @@ async def test_complete_invitation_and_notification_workflow():
     async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as client:
         pwd = "Password123!"
 
+        import random
+        owner_digits = ''.join(random.choices('0123456789', k=8))
+        target_digits = ''.join(random.choices('0123456789', k=8))
+
         # 1. Register Owner
         owner_email = f"owner_{uuid4().hex[:6]}@example.com"
         resp = await register_user_in_test(client, {
             "email": owner_email,
             "password": pwd,
-            "phone_number": f"+9199{uuid4().hex[:8]}",
+            "phone_number": f"+9199{owner_digits}",
             "first_name": "Org",
             "last_name": "Owner"
         })
@@ -50,7 +54,7 @@ async def test_complete_invitation_and_notification_workflow():
         resp = await register_user_in_test(client, {
             "email": target_email,
             "password": pwd,
-            "phone_number": f"+9198{uuid4().hex[:8]}",
+            "phone_number": f"+9198{target_digits}",
             "first_name": "Target",
             "last_name": "Recipient"
         })

@@ -66,10 +66,14 @@ async def issue_invitation(
 
 @router.get("/invitations", response_model=List[InvitationResponse])
 async def list_invitations(
+    organization_id: Optional[UUID] = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session)
 ):
-    invites = await invite_service.list_user_invitations(db, current_user.email)
+    if organization_id:
+        invites = await invite_service.list_org_invitations(db, organization_id)
+    else:
+        invites = await invite_service.list_user_invitations(db, current_user.email)
     res = []
     for inv in invites:
         item = InvitationResponse.model_validate(inv)

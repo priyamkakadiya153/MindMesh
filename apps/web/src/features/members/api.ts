@@ -80,7 +80,8 @@ export async function issueInvitation(token: string, orgId: string, invitationDa
 }
 
 export async function getPendingInvitations(token: string, orgId: string) {
-  const res = await authedFetch(`${API_BASE}/members/invitations`, token, orgId);
+  const query = orgId ? `?organization_id=${orgId}` : '';
+  const res = await authedFetch(`${API_BASE}/members/invitations${query}`, token, orgId);
   if (!res.ok) throw new Error('Failed to load pending invitations');
   return res.json();
 }

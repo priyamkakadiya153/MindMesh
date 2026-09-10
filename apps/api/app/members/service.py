@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, and_, or_, String
+from sqlalchemy import select, update, delete, and_, or_, String, func
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
@@ -289,14 +289,30 @@ class EnterpriseInvitationService:
         return invitation
 
     async def list_user_invitations(self, db: AsyncSession, email: str) -> List[Invitation]:
+        clean_email = (email or '').strip().lower()
         stmt = (
             select(Invitation)
             .options(selectinload(Invitation.organization), selectinload(Invitation.workspace), selectinload(Invitation.project))
             .where(
-                Invitation.email == email,
+                func.lower(Invitation.email) == clean_email,
                 Invitation.status == "pending",
                 Invitation.deleted_at.is_(None)
             )
+            .order_by(Invitation.created_at.desc())
+        )
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def list_org_invitations(self, db: AsyncSession, org_id: UUID) -> List[Invitation]:
+        stmt = (
+            select(Invitation)
+            .options(selectinload(Invitation.organization), selectinload(Invitation.workspace), selectinload(Invitation.project))
+            .where(
+                Invitation.organization_id == org_id,
+                Invitation.status == "pending",
+                Invitation.deleted_at.is_(None)
+            )
+            .order_by(Invitation.created_at.desc())
         )
         res = await db.execute(stmt)
         return list(res.scalars().all())
