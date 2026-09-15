@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { apiClient } from '../../lib/api-client';
 
-const API_BASE = '/api/v1/proactive/action-detection';
+const API_PATH = '/proactive/action-detection';
 
 export interface ProactiveSuggestionItem {
   id: string;
@@ -38,13 +38,11 @@ export interface DetectSignalPayload {
 }
 
 export async function detectActionableSignal(
-  token: string,
-  payload: DetectSignalPayload
+  token?: string,
+  payload?: DetectSignalPayload
 ): Promise<{ detected: boolean; duplicate?: boolean; suggestion?: ProactiveSuggestionItem }> {
   try {
-    const res = await axios.post(`${API_BASE}/detect`, payload, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiClient.post(`${API_PATH}/detect`, payload);
     return res.data;
   } catch (err) {
     console.error('Failed to run proactive signal detection:', err);
@@ -53,33 +51,40 @@ export async function detectActionableSignal(
 }
 
 export async function fetchProactiveSuggestions(
-  token: string,
+  token?: string,
   conversationId?: string,
   sourceType?: string,
   statusFilter?: string
 ): Promise<ProactiveSuggestionItem[]> {
   try {
-    const res = await axios.get(`${API_BASE}/suggestions`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const res = await apiClient.get(`${API_PATH}/suggestions`, {
       params: {
         conversation_id: conversationId,
         source_type: sourceType,
         status_filter: statusFilter || 'DETECTED'
       }
     });
-    return res.data;
+    const data = res.data;
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && Array.isArray(data.items)) {
+      return data.items;
+    }
+    if (data && Array.isArray(data.suggestions)) {
+      return data.suggestions;
+    }
+    return [];
   } catch (err) {
     console.error('Failed to fetch proactive suggestions:', err);
     return [];
   }
 }
 
-export async function fetchPendingSuggestionsCount(token: string): Promise<number> {
+export async function fetchPendingSuggestionsCount(token?: string): Promise<number> {
   try {
-    const res = await axios.get(`${API_BASE}/count`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    return res.data.pending_count || 0;
+    const res = await apiClient.get(`${API_PATH}/count`);
+    return res.data?.pending_count || 0;
   } catch (err) {
     console.error('Failed to fetch pending suggestions count:', err);
     return 0;
@@ -87,13 +92,11 @@ export async function fetchPendingSuggestionsCount(token: string): Promise<numbe
 }
 
 export async function dismissProactiveSuggestion(
-  token: string,
-  suggestionId: string
+  token?: string,
+  suggestionId?: string
 ): Promise<boolean> {
   try {
-    await axios.post(`${API_BASE}/suggestions/${suggestionId}/dismiss`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    await apiClient.post(`${API_PATH}/suggestions/${suggestionId}/dismiss`, {});
     return true;
   } catch (err) {
     console.error('Failed to dismiss proactive suggestion:', err);
@@ -102,15 +105,13 @@ export async function dismissProactiveSuggestion(
 }
 
 export async function promoteProactiveSuggestion(
-  token: string,
+  token: string | undefined,
   suggestionId: string,
   targetActionType: 'TASK' | 'REMINDER' = 'TASK'
 ): Promise<{ status: string; proposal: any }> {
   try {
-    const res = await axios.post(`${API_BASE}/suggestions/${suggestionId}/promote`, {
+    const res = await apiClient.post(`${API_PATH}/suggestions/${suggestionId}/promote`, {
       target_action_type: targetActionType
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
     });
     return res.data;
   } catch (err) {
@@ -120,13 +121,11 @@ export async function promoteProactiveSuggestion(
 }
 
 export async function cancelProactiveProposal(
-  token: string,
-  suggestionId: string
+  token?: string,
+  suggestionId?: string
 ): Promise<boolean> {
   try {
-    await axios.post(`${API_BASE}/suggestions/${suggestionId}/cancel_proposal`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    await apiClient.post(`${API_PATH}/suggestions/${suggestionId}/cancel_proposal`, {});
     return true;
   } catch (err) {
     console.error('Failed to cancel proactive proposal:', err);

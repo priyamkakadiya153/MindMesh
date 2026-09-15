@@ -1,6 +1,4 @@
-import axios from 'axios';
-
-const API_BASE = '/api/v1';
+import { apiClient, getApiBase } from '../../lib/api-client';
 
 export interface CitationData {
   id?: string;
@@ -133,196 +131,179 @@ export interface AIGatewayHealth {
 // ---------------- CONVERSATION MANAGEMENT APIs ----------------
 
 export async function createConversation(
-  token: string,
-  payload: { title?: string; description?: string; workspace_id?: string }
+  token?: string,
+  payload?: { title?: string; description?: string; workspace_id?: string }
 ): Promise<ConversationItem> {
-  const res = await axios.post(`${API_BASE}/chat/conversations`, payload, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post('/chat/conversations', payload);
   return res.data;
 }
 
 export async function fetchConversations(
-  token: string,
+  token?: string,
   params?: { workspace_id?: string; is_pinned?: boolean; q?: string; page?: number; limit?: number }
 ): Promise<PaginatedConversations> {
-  const res = await axios.get(`${API_BASE}/chat/conversations`, {
-    headers: { Authorization: `Bearer ${token}` },
-    params
-  });
-  return res.data;
+  const res = await apiClient.get('/chat/conversations', { params });
+  const data = res.data;
+  if (data && Array.isArray(data.conversations)) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return {
+      conversations: data,
+      total: data.length,
+      page: 1,
+      limit: 20,
+      total_pages: 1
+    };
+  }
+  return {
+    conversations: [],
+    total: 0,
+    page: 1,
+    limit: 20,
+    total_pages: 1
+  };
 }
 
 export async function fetchRecentConversations(
-  token: string,
+  token?: string,
   workspace_id?: string
 ): Promise<ConversationItem[]> {
-  const res = await axios.get(`${API_BASE}/chat/conversations/recent`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const res = await apiClient.get('/chat/conversations/recent', {
     params: { workspace_id }
   });
-  return res.data;
+  return Array.isArray(res.data) ? res.data : (res.data?.conversations || []);
 }
 
 export async function searchConversations(
-  token: string,
-  query: string,
+  token?: string,
+  query?: string,
   workspace_id?: string
 ): Promise<ConversationItem[]> {
-  const res = await axios.get(`${API_BASE}/chat/conversations/search`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const res = await apiClient.get('/chat/conversations/search', {
     params: { q: query, workspace_id }
   });
-  return res.data;
+  return Array.isArray(res.data) ? res.data : (res.data?.conversations || []);
 }
 
 export async function fetchConversationDetails(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<any> {
-  const res = await axios.get(`${API_BASE}/chat/${conversationId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.get(`/chat/${conversationId}`);
   return res.data;
 }
 
 export async function updateConversation(
-  token: string,
+  token: string | undefined,
   conversationId: string,
   payload: { title?: string; description?: string; is_pinned?: boolean; workspace_id?: string; settings?: Record<string, any> }
 ): Promise<any> {
-  const res = await axios.patch(`${API_BASE}/chat/conversations/${conversationId}`, payload, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.patch(`/chat/conversations/${conversationId}`, payload);
   return res.data;
 }
 
 export async function pinConversation(
-  token: string,
+  token: string | undefined,
   conversationId: string,
   is_pinned: boolean
 ): Promise<ConversationItem> {
-  const res = await axios.post(
-    `${API_BASE}/chat/conversations/${conversationId}/pin`,
-    { is_pinned },
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
+  const res = await apiClient.post(`/chat/conversations/${conversationId}/pin`, { is_pinned });
   return res.data;
 }
 
 export async function deleteConversation(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<any> {
-  const res = await axios.delete(`${API_BASE}/chat/conversations/${conversationId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.delete(`/chat/conversations/${conversationId}`);
   return res.data;
 }
 
 // ---------------- MESSAGE APIs ----------------
 
 export async function fetchMessages(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<ChatMessage[]> {
-  const res = await axios.get(`${API_BASE}/chat/conversations/${conversationId}/messages`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return res.data;
+  const res = await apiClient.get(`/chat/conversations/${conversationId}/messages`);
+  return Array.isArray(res.data) ? res.data : (res.data?.messages || []);
 }
 
 export async function createMessage(
-  token: string,
+  token: string | undefined,
   conversationId: string,
   payload: { content: string; role?: string; content_type?: string; model?: string; token_count?: number; latency_ms?: number; metadata?: Record<string, any> }
 ): Promise<ChatMessage> {
-  const res = await axios.post(`${API_BASE}/chat/conversations/${conversationId}/messages`, payload, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post(`/chat/conversations/${conversationId}/messages`, payload);
   return res.data;
 }
 
 export async function executeChat(
-  token: string,
+  token: string | undefined,
   payload: SendChatPayload
 ): Promise<any> {
-  const res = await axios.post(`${API_BASE}/chat`, payload, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post('/chat', payload);
   return res.data;
 }
 
 export async function deleteMessage(
-  token: string,
+  token: string | undefined,
   messageId: string
 ): Promise<any> {
-  const res = await axios.delete(`${API_BASE}/chat/messages/${messageId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.delete(`/chat/messages/${messageId}`);
   return res.data;
 }
 
 export async function exportConversation(
-  token: string,
+  token: string | undefined,
   conversationId: string,
   format: 'markdown' | 'json' = 'markdown'
 ): Promise<Blob | any> {
-  const res = await axios.post(
-    `${API_BASE}/chat/export?conversation_id=${conversationId}`,
+  const res = await apiClient.post(
+    `/chat/export?conversation_id=${conversationId}`,
     { format },
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      responseType: format === 'markdown' ? 'blob' : 'json'
-    }
+    { responseType: format === 'markdown' ? 'blob' : 'json' }
   );
   return res.data;
 }
 
 export async function retryChatMessage(
-  token: string,
+  token: string | undefined,
   messageId: string
 ): Promise<AIGatewayResponse> {
-  const res = await axios.post(`${API_BASE}/ai/gateway/messages/${messageId}/retry`, {}, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post(`/ai/gateway/messages/${messageId}/retry`, {});
   return res.data;
 }
 
 export async function regenerateChatMessage(
-  token: string,
+  token: string | undefined,
   messageId: string
 ): Promise<AIGatewayResponse> {
-  const res = await axios.post(`${API_BASE}/ai/gateway/messages/${messageId}/regenerate`, {}, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post(`/ai/gateway/messages/${messageId}/regenerate`, {});
   return res.data;
 }
 
 export async function stopGeneration(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<any> {
   return cancelChatGeneration(token, conversationId);
 }
 
 export async function regenerateResponse(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<any> {
-  const res = await axios.post(`${API_BASE}/ai/gateway/messages/${conversationId}/regenerate`, {}, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post(`/ai/gateway/messages/${conversationId}/regenerate`, {});
   return res.data;
 }
 
 export async function cancelChatGeneration(
-  token: string,
+  token: string | undefined,
   conversationId: string
 ): Promise<any> {
-  const res = await axios.post(`${API_BASE}/ai/gateway/conversations/${conversationId}/cancel`, {}, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post(`/ai/gateway/conversations/${conversationId}/cancel`, {});
   return res.data;
 }
 
@@ -347,8 +328,12 @@ export async function streamChatMessage(
   if (payload.organization_id || payload.org_id) {
     headers['X-Organization-ID'] = (payload.organization_id || payload.org_id)!;
   }
+
+  const base = getApiBase().replace(/\/+$/, '');
+  const url = `${base}/ai/gateway/chat/stream`;
+
   try {
-    const response = await fetch(`${API_BASE}/ai/gateway/chat/stream`, {
+    const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -425,17 +410,17 @@ export async function streamChatMessage(
 // ---------------- AI GATEWAY CLIENT APIs ----------------
 
 export async function fetchGatewayHealth(): Promise<AIGatewayHealth> {
-  const res = await axios.get(`${API_BASE}/ai/gateway/health`);
+  const res = await apiClient.get('/ai/gateway/health');
   return res.data;
 }
 
 export async function fetchGatewayModels(provider?: string): Promise<string[]> {
-  const res = await axios.get(`${API_BASE}/ai/gateway/models`, { params: { provider } });
-  return res.data;
+  const res = await apiClient.get('/ai/gateway/models', { params: { provider } });
+  return Array.isArray(res.data) ? res.data : (res.data?.models || []);
 }
 
 export async function sendGatewayChat(
-  token: string,
+  token: string | undefined,
   payload: {
     message: string;
     conversation_id?: string;
@@ -448,9 +433,8 @@ export async function sendGatewayChat(
     system_prompt?: string;
   }
 ): Promise<AIGatewayResponse> {
-  const res = await axios.post(`${API_BASE}/ai/gateway/chat`, payload, {
+  const res = await apiClient.post('/ai/gateway/chat', payload, {
     headers: {
-      Authorization: `Bearer ${token}`,
       'X-Idempotency-Key': payload.idempotency_key || ''
     }
   });
@@ -458,11 +442,10 @@ export async function sendGatewayChat(
 }
 
 export async function confirmActionProposal(
-  token: string,
+  token: string | undefined,
   payload: { proposal_id: string; intent_type: string; parameters: Record<string, any>; confirm: boolean }
 ): Promise<ActionResultData> {
-  const res = await axios.post(`${API_BASE}/actions/confirm`, payload, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await apiClient.post('/actions/confirm', payload);
   return res.data;
 }
+

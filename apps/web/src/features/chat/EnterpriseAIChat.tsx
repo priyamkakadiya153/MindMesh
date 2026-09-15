@@ -123,13 +123,14 @@ export const EnterpriseAIChat: React.FC = () => {
         limit: 20
       });
 
+      const items = Array.isArray(res?.conversations) ? res.conversations : [];
       if (resetPage) {
-        setConversations(res.conversations);
+        setConversations(items);
       } else {
-        setConversations(prev => [...prev, ...res.conversations]);
+        setConversations(prev => [...(Array.isArray(prev) ? prev : []), ...items]);
       }
 
-      setHasMore(res.page < res.total_pages);
+      setHasMore(res && typeof res.page === 'number' && typeof res.total_pages === 'number' ? res.page < res.total_pages : false);
     } catch (err: any) {
       console.error("Failed to load conversations:", err);
     } finally {

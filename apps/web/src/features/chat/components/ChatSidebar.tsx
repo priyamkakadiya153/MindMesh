@@ -60,8 +60,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const [menuPosition, setMenuPosition] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const pinned = conversations.filter(c => c.is_pinned);
-  const recent = conversations.filter(c => !c.is_pinned);
+  const safeConversations = Array.isArray(conversations) ? conversations : [];
+  const pinned = safeConversations.filter(c => c && c.is_pinned);
+  const recent = safeConversations.filter(c => c && !c.is_pinned);
 
   // Close open menu on Escape key press or page scroll
   useEffect(() => {

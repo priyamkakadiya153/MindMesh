@@ -46,6 +46,7 @@ import { UniversalSearchModal } from './features/search/UniversalSearchModal';
 import { EmailVerificationBanner } from './components/auth/EmailVerificationBanner';
 import { useNotificationStore } from './features/notifications/store';
 import { NotificationDrawer } from './features/notifications/components/NotificationDrawer';
+import { apiClient } from './lib/api-client';
 
 import { ErrorBoundary } from './shared/components/ErrorBoundary';
 import { CognitiveAgentsPage } from './features/cognitive-agents/components/CognitiveAgentsPage';
@@ -326,15 +327,9 @@ function App() {
 
   const checkHealth = async () => {
     try {
-      const healthRes = await fetch(`${API_URL}/health`);
-      if (healthRes.ok) {
-        const healthData = await healthRes.json();
-        setBackendStatus('running');
-        setDbConnected(healthData.database === 'connected');
-      } else {
-        setBackendStatus('offline');
-        setDbConnected(false);
-      }
+      const healthRes = await apiClient.get('/health');
+      setBackendStatus('running');
+      setDbConnected(healthRes.data?.database === 'connected');
     } catch (e) {
       setBackendStatus('offline');
       setDbConnected(false);
@@ -453,38 +448,21 @@ function App() {
 
     setSearchError(null);
     try {
-      const params = new URLSearchParams({ q: searchQuery.trim() });
-      if (currentOrg?.id) params.append('organization_id', currentOrg.id);
-      if (currentWorkspace?.id) params.append('workspace_id', currentWorkspace.id);
+      const params: Record<string, any> = { q: searchQuery.trim() };
+      if (currentOrg?.id) params.organization_id = currentOrg.id;
+      if (currentWorkspace?.id) params.workspace_id = currentWorkspace.id;
 
-      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-      if (currentOrg?.id) headers['X-Organization-ID'] = currentOrg.id;
-
-      const res = await fetch(`http://127.0.0.1:4000/api/v1/search?${params.toString()}`, {
-        headers
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const rawItems = data.items || data.results || [];
-        setSearchResults(rawItems.map((item: any) => ({
-          title: item.title,
-          snippet: item.snippet || item.excerpt || '',
-          score: item.score || 0.95
-        })));
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        let errorMsg = 'Search failed. Please try again.';
-        if (errData?.detail) {
-          if (typeof errData.detail === 'string') errorMsg = errData.detail;
-          else if (Array.isArray(errData.detail)) {
-            errorMsg = errData.detail.map((d: any) => d.msg || d.detail).join('; ');
-          }
-        }
-        setSearchError(errorMsg);
-        setSearchResults([]);
-      }
-    } catch (err) {
-      setSearchError('Search failed. Please check network connection.');
+      const res = await apiClient.get('/search', { params });
+      const data = res.data;
+      const rawItems = data.items || data.results || [];
+      setSearchResults(rawItems.map((item: any) => ({
+        title: item.title,
+        snippet: item.snippet || item.excerpt || '',
+        score: item.score || 0.95
+      })));
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || err.response?.data?.message || err.message;
+      setSearchError(typeof detail === 'string' ? detail : 'Search failed. Please try again.');
       setSearchResults([]);
     }
   };

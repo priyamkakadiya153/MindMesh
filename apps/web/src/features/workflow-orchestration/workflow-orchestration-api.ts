@@ -1,4 +1,6 @@
-const API_BASE_URL = '/api/v1';
+import { getApiBase } from '../../lib/api-client';
+
+const API_BASE_URL = getApiBase();
 
 function getAuthHeaders(token?: string) {
   const authToken = token || localStorage.getItem('token') || '';

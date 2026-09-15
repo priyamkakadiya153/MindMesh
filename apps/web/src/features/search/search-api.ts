@@ -1,16 +1,4 @@
-const API_BASE_URL = 'http://127.0.0.1:4000/api/v1';
-
-function getAuthHeaders(token?: string, organizationId?: string) {
-  const authToken = token || localStorage.getItem('token') || '';
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${authToken}`
-  };
-  if (organizationId) {
-    headers['X-Organization-ID'] = organizationId;
-  }
-  return headers;
-}
+import { apiClient } from '../../lib/api-client';
 
 export interface SearchResultItem {
   id: string;
@@ -72,19 +60,16 @@ export async function globalSearch(
     };
   }
 
-  const params = new URLSearchParams({ q: query.trim(), type: entityType });
-  if (organizationId) params.append('organization_id', organizationId);
-  if (workspaceId && workspaceId !== 'all') params.append('workspace_id', workspaceId);
+  const params: Record<string, any> = { q: query.trim(), type: entityType };
+  if (organizationId) params.organization_id = organizationId;
+  if (workspaceId && workspaceId !== 'all') params.workspace_id = workspaceId;
 
-  const res = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
-    headers: getAuthHeaders(token, organizationId)
-  });
+  const headers: Record<string, string> = {};
+  if (organizationId) headers['X-Organization-ID'] = organizationId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  if (!res.ok) {
-    throw new Error('Search request failed');
-  }
-
-  const data = await res.json();
+  const res = await apiClient.get('/search', { params, headers });
+  const data = res.data;
   const rawItems = data.items || data.results || [];
   
   // Normalize fields for UI compatibility
@@ -126,31 +111,41 @@ export async function getAutocompleteSuggestions(
   token?: string
 ): Promise<AutocompleteSuggestion[]> {
   if (!query || query.trim().length < 1) return [];
-  const params = new URLSearchParams({ q: query.trim() });
-  if (organizationId) params.append('organization_id', organizationId);
+  const params: Record<string, any> = { q: query.trim() };
+  if (organizationId) params.organization_id = organizationId;
 
-  const res = await fetch(`${API_BASE_URL}/search/suggestions?${params.toString()}`, {
-    headers: getAuthHeaders(token, organizationId)
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data || []).map((s: any, idx: number) => ({
-    id: String(s.id || idx),
-    title: s.title || query,
-    type: (s.entity_type || s.type || 'DOCUMENT').toUpperCase()
-  }));
+  const headers: Record<string, string> = {};
+  if (organizationId) headers['X-Organization-ID'] = organizationId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await apiClient.get('/search/suggestions', { params, headers });
+    const data = res.data;
+    return (data || []).map((s: any, idx: number) => ({
+      id: String(s.id || idx),
+      title: s.title || query,
+      type: (s.entity_type || s.type || 'DOCUMENT').toUpperCase()
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function getRecentSearches(organizationId?: string, token?: string): Promise<string[]> {
-  const params = new URLSearchParams();
-  if (organizationId) params.append('organization_id', organizationId);
+  const params: Record<string, any> = {};
+  if (organizationId) params.organization_id = organizationId;
 
-  const res = await fetch(`${API_BASE_URL}/search/recent?${params.toString()}`, {
-    headers: getAuthHeaders(token, organizationId)
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data || []).map((item: any) => typeof item === 'string' ? item : item.query);
+  const headers: Record<string, string> = {};
+  if (organizationId) headers['X-Organization-ID'] = organizationId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await apiClient.get('/search/recent', { params, headers });
+    const data = res.data;
+    return (data || []).map((item: any) => typeof item === 'string' ? item : item.query);
+  } catch {
+    return [];
+  }
 }
 
 export async function clearSearchHistory(token?: string): Promise<boolean> {

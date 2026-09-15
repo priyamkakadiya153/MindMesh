@@ -65,7 +65,7 @@ function ActionInboxContent() {
       else if (statusFilter === 'ALL') backendStatusFilter = 'ALL';
 
       const items = await fetchProactiveSuggestions(token, undefined, sourceTypeFilter, backendStatusFilter);
-      setSuggestions(items);
+      setSuggestions(Array.isArray(items) ? items : []);
     } catch (err: any) {
       console.error('Failed to load Action Inbox candidates:', err);
       setError('Failed to load candidate actions.');
@@ -96,7 +96,7 @@ function ActionInboxContent() {
   const handleDismiss = async (suggestionId: string) => {
     if (!token) return;
     await dismissProactiveSuggestion(token, suggestionId);
-    setSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+    setSuggestions(prev => (Array.isArray(prev) ? prev : []).filter(s => s.id !== suggestionId));
   };
 
   // Handle Open Conversation Handoff (AUTO-11B Source Message Deep Link)
@@ -113,16 +113,18 @@ function ActionInboxContent() {
   };
 
   // Calculated Metric Summary Counts
-  const needsAttentionCount = suggestions.filter(s => s.status === 'DETECTED' || s.status === 'PENDING' || s.status === 'PENDING_CONFIRMATION').length;
-  const dueSoonCount = suggestions.filter(s => s.normalized_deadline && new Date(s.normalized_deadline).getTime() - Date.now() < 48 * 3600 * 1000).length;
-  const deadlinesCount = suggestions.filter(s => s.deadline).length;
-  const followupsCount = suggestions.filter(s => s.detected_action_type === 'TASK' || s.confidence_level === 'HIGH').length;
+  const safeSuggestions = Array.isArray(suggestions) ? suggestions : [];
+  const needsAttentionCount = safeSuggestions.filter(s => s && (s.status === 'DETECTED' || s.status === 'PENDING' || s.status === 'PENDING_CONFIRMATION')).length;
+  const dueSoonCount = safeSuggestions.filter(s => s && s.normalized_deadline && new Date(s.normalized_deadline).getTime() - Date.now() < 48 * 3600 * 1000).length;
+  const deadlinesCount = safeSuggestions.filter(s => s && s.deadline).length;
+  const followupsCount = safeSuggestions.filter(s => s && (s.detected_action_type === 'TASK' || s.confidence_level === 'HIGH')).length;
 
   // Filtered Display List
-  const filteredItems = suggestions.filter(item => {
+  const filteredItems = safeSuggestions.filter(item => {
+    if (!item) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchTitle = item.title.toLowerCase().includes(q);
+      const matchTitle = (item.title || '').toLowerCase().includes(q);
       const matchContent = (item.source_content || '').toLowerCase().includes(q);
       const matchSource = (item.source_label || '').toLowerCase().includes(q);
       if (!matchTitle && !matchContent && !matchSource) return false;
