@@ -8,6 +8,31 @@ export const getApiBase = () => {
   return cleanUrl.endsWith('/api/v1') ? cleanUrl : `${cleanUrl}/api/v1`;
 };
 
+export const getWsBase = (): string => {
+  const envWsUrl = (import.meta as any).env?.VITE_WS_URL;
+  if (envWsUrl && typeof envWsUrl === 'string' && envWsUrl.trim()) {
+    const clean = envWsUrl.trim().replace(/\/+$/, '');
+    return clean.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+  }
+
+  const envApiUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envApiUrl && typeof envApiUrl === 'string' && envApiUrl.trim() && envApiUrl !== '/api/v1') {
+    const clean = envApiUrl.trim().replace(/\/+$/, '');
+    const wsUrl = clean.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+    return wsUrl.replace(/\/api\/v1\/?$/i, '');
+  }
+
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return 'wss://mindmesh-mctu.onrender.com';
+    }
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProto}//${window.location.host}`;
+  }
+
+  return 'ws://localhost:4000';
+};
+
 export const API_BASE = getApiBase();
 
 export const apiClient = axios.create({

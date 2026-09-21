@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import { useAuth } from '../auth/auth-provider';
 import { getOfflineQueue, removeOfflineMessage, QueuedMessage } from './offlineQueue';
 import * as dmApi from './api';
+import { getWsBase } from '../../lib/api-client';
 
 export type ConnectionState = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
 
@@ -73,9 +74,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setConnectionState(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.host;
-    const wsUrl = `${wsProtocol}//${wsHost}/ws/chat?token=${encodeURIComponent(token)}`;
+    const wsBase = getWsBase();
+    let wsUrl = `${wsBase}/ws/chat?token=${encodeURIComponent(token)}`;
+    if (currentOrg?.id) {
+      wsUrl += `&organization_id=${encodeURIComponent(currentOrg.id)}`;
+    }
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -126,19 +129,50 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     ws.onerror = (err) => {
       console.error('WebSocket Error:', err);
     };
-  }, [token, flushOfflineQueue]);
+  }, [token, currentOrg?.id, flushOfflineQueue]);
 
   useEffect(() => {
     if (token) {
       connect();
     } else {
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     }
 
     return () => {
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [token, currentOrg?.id, connect]);
+
+  // Reconnect automatically when network comes back online or tab becomes visible
+  useEffect(() => {
+    const handleOnline = () => {
+      if (token && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING)) {
+        reconnectAttemptRef.current = 0;
+        connect();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && token) {
+        if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+          reconnectAttemptRef.current = 0;
+          connect();
+        }
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [token, connect]);
 
