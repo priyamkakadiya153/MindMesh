@@ -118,46 +118,65 @@ class ConnectionManager:
             self.user_sessions[user_id] = {}
         self.user_sessions[user_id][conn_id] = session
 
-        p_info = presence_service.set_user_presence(user_id, "online")
-
         if was_offline:
             asyncio.create_task(self.sync_and_broadcast_presence(user_id, "online", p_info["last_seen"]))
+
+        # Send initial presence of all currently online users to the newly connected socket
+        for online_uid, sessions in list(self.user_sessions.items()):
+            if str(online_uid).lower() != str(user_id).lower() and len(sessions) > 0:
+                p_data = presence_service.get_user_presence(str(online_uid))
+                if p_data.get("status") == "online":
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "event": "presence_updated",
+                            "user_id": str(online_uid),
+                            "status": "online",
+                            "last_seen": p_data.get("last_seen", now.isoformat())
+                        }))
+                    except Exception:
+                        pass
 
         # Start sweeper if not running
         await self.start_heartbeat_sweeper()
         return session
 
     def update_heartbeat(self, user_id: str, connection_id: str):
-        if user_id in self.user_sessions and connection_id in self.user_sessions[user_id]:
-            self.user_sessions[user_id][connection_id].last_heartbeat = datetime.utcnow()
+        u_str = str(user_id).lower()
+        for uid_key in list(self.user_sessions.keys()):
+            if str(uid_key).lower() == u_str:
+                if connection_id in self.user_sessions[uid_key]:
+                    self.user_sessions[uid_key][connection_id].last_heartbeat = datetime.utcnow()
 
     def disconnect(self, websocket: WebSocket, user_id: str, connection_id: Optional[str] = None):
-        if user_id in self.user_sessions:
-            if connection_id and connection_id in self.user_sessions[user_id]:
-                del self.user_sessions[user_id][connection_id]
+        u_str = str(user_id).lower()
+        matching_keys = [k for k in list(self.user_sessions.keys()) if str(k).lower() == u_str]
+        for k in matching_keys:
+            if connection_id and connection_id in self.user_sessions[k]:
+                del self.user_sessions[k][connection_id]
             else:
-                # Find and remove matching socket
-                to_del = [cid for cid, s in self.user_sessions[user_id].items() if s.websocket == websocket]
+                to_del = [cid for cid, s in self.user_sessions[k].items() if s.websocket == websocket]
                 for cid in to_del:
-                    del self.user_sessions[user_id][cid]
+                    del self.user_sessions[k][cid]
 
-            if not self.user_sessions.get(user_id):
-                if user_id in self.user_sessions:
-                    del self.user_sessions[user_id]
-                p_info = presence_service.mark_user_offline(user_id)
-                asyncio.create_task(self.sync_and_broadcast_presence(user_id, "offline", p_info["last_seen"]))
+            if not self.user_sessions.get(k):
+                if k in self.user_sessions:
+                    del self.user_sessions[k]
+                p_info = presence_service.mark_user_offline(str(user_id))
+                asyncio.create_task(self.sync_and_broadcast_presence(str(user_id), "offline", p_info["last_seen"]))
 
     async def send_personal_message(self, message: dict, user_id: str):
-        if user_id in self.user_sessions:
+        u_str = str(user_id).lower()
+        matching_keys = [k for k in list(self.user_sessions.keys()) if str(k).lower() == u_str]
+        for k in matching_keys:
             stale_conns = []
-            for conn_id, session in list(self.user_sessions[user_id].items()):
+            for conn_id, session in list(self.user_sessions[k].items()):
                 try:
                     await session.websocket.send_text(json.dumps(message))
                 except Exception as e:
                     logger.warning(f"Failed sending WS event to user {user_id} session {conn_id}: {e}")
-                    stale_conns.append((session.websocket, conn_id))
-            for ws, conn_id in stale_conns:
-                self.disconnect(ws, user_id, conn_id)
+                    stale_conns.append((session.websocket, k, conn_id))
+            for ws, k_key, conn_id in stale_conns:
+                self.disconnect(ws, k_key, conn_id)
 
     async def broadcast_to_users(self, message: dict, user_ids: List[str]):
         for uid in user_ids:

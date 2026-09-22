@@ -18,7 +18,9 @@ interface WebSocketContextType {
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { token, currentOrg } = useAuth();
+  const auth = useAuth();
+  const token = auth.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+  const currentOrg = auth.currentOrg;
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [queuedCount, setQueuedCount] = useState(0);
 
@@ -67,7 +69,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [token]);
 
   const connect = useCallback(() => {
-    if (!token) return;
+    const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+    if (!activeToken) return;
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -75,60 +78,75 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setConnectionState(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
 
     const wsBase = getWsBase();
-    let wsUrl = `${wsBase}/ws/chat?token=${encodeURIComponent(token)}`;
+    let wsUrl = `${wsBase}/ws/chat?token=${encodeURIComponent(activeToken)}`;
     if (currentOrg?.id) {
       wsUrl += `&organization_id=${encodeURIComponent(currentOrg.id)}`;
     }
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-    ws.onopen = () => {
-      setConnectionState('connected');
-      reconnectAttemptRef.current = 0;
+      ws.onopen = () => {
+        setConnectionState('connected');
+        reconnectAttemptRef.current = 0;
 
-      // Start Heartbeat interval
-      if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
-      heartbeatTimerRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ event: 'ping' }));
+        // Broadcast online presence immediately on open
+        try {
+          ws.send(JSON.stringify({ event: 'update_status', status: 'online' }));
+        } catch {}
+
+        // Start Heartbeat interval (every 20s)
+        if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ event: 'ping' }));
+          }
+        }, 20000);
+
+        // Flush offline messages
+        flushOfflineQueue();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const evtType = data.event;
+
+          if (evtType && listenersRef.current.has(evtType)) {
+            listenersRef.current.get(evtType)!.forEach(cb => {
+              try {
+                cb(data);
+              } catch (cbErr) {
+                console.error(`Error in WS listener for ${evtType}:`, cbErr);
+              }
+            });
+          }
+        } catch (e) {
+          console.error('WS JSON decode error:', e);
         }
-      }, 30000);
+      };
 
-      // Flush offline messages
-      flushOfflineQueue();
-    };
+      ws.onclose = () => {
+        setConnectionState('disconnected');
+        if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        const evtType = data.event;
+        // Schedule Exponential Backoff Reconnection (1s, 2s, 4s, 8s, max 15s)
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 15000);
+        reconnectAttemptRef.current += 1;
 
-        if (evtType && listenersRef.current.has(evtType)) {
-          listenersRef.current.get(evtType)!.forEach(cb => cb(data));
-        }
-      } catch (e) {
-        console.error('WS JSON decode error:', e);
-      }
-    };
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          connect();
+        }, delay);
+      };
 
-    ws.onclose = () => {
-      setConnectionState('disconnected');
-      if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
-
-      // Schedule Exponential Backoff Reconnection (1s, 2s, 4s, 8s, max 30s)
-      const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000);
-      reconnectAttemptRef.current += 1;
-
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = setTimeout(() => {
-        connect();
-      }, delay);
-    };
-
-    ws.onerror = (err) => {
-      console.error('WebSocket Error:', err);
-    };
+      ws.onerror = (err) => {
+        console.error('WebSocket Error:', err);
+      };
+    } catch (e) {
+      console.error('Failed creating WebSocket:', e);
+    }
   }, [token, currentOrg?.id, flushOfflineQueue]);
 
   useEffect(() => {

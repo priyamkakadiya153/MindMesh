@@ -343,9 +343,20 @@ async def send_message(
     for rec in recipients:
         rec.unread_count = (rec.unread_count or 0) + 1
         rec_id_str = str(rec.user_id)
-        recipient_ids.append(rec_id_str)
+        if rec_id_str not in recipient_ids:
+            recipient_ids.append(rec_id_str)
         if rec_id_str in manager.user_sessions and len(manager.user_sessions[rec_id_str]) > 0:
             is_any_rec_online = True
+
+    # Fallback for private 1-on-1 conversations if other member not found in query
+    if conv.type == "private":
+        other_user_id = conv.participant_two if conv.participant_one == current_user.id else conv.participant_one
+        if other_user_id:
+            other_id_str = str(other_user_id)
+            if other_id_str not in recipient_ids:
+                recipient_ids.append(other_id_str)
+            if other_id_str in manager.user_sessions and len(manager.user_sessions[other_id_str]) > 0:
+                is_any_rec_online = True
 
     if is_any_rec_online:
         msg.status = "delivered"

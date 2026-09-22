@@ -13,7 +13,7 @@ import { GroupHeader } from '../../features/direct-messages/components/GroupHead
 import { GroupModal } from '../../features/direct-messages/components/GroupModal';
 import { MemberListDrawer } from '../../features/direct-messages/components/MemberListDrawer';
 import { FilePreviewModal } from '../../features/files/components/FilePreviewModal';
-import { WebSocketProvider } from '../../features/direct-messages/WebSocketContext';
+import { getApiBase } from '../../lib/api-client';
 import { EmptyState } from '../../shared/components/EmptyState';
 import { ErrorBoundary } from '../../components/common/ErrorBoundary';
 import { AlertCircle, ArrowDown, Loader2, MessageSquare, Plus, UserPlus, Users } from 'lucide-react';
@@ -30,9 +30,7 @@ import {
 export function DirectMessagesPage() {
   return (
     <ErrorBoundary title="Direct Messages system unavailable">
-      <WebSocketProvider>
-        <DirectMessagesContent />
-      </WebSocketProvider>
+      <DirectMessagesContent />
     </ErrorBoundary>
   );
 }
@@ -158,7 +156,8 @@ function DirectMessagesContent() {
   // Fetch Organization Members
   useEffect(() => {
     if (!currentOrg?.id || !token) return;
-    fetch(`/api/v1/members?organization_id=${currentOrg.id}`, {
+    const apiBase = getApiBase();
+    fetch(`${apiBase}/members?organization_id=${currentOrg.id}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(r => r.json())
@@ -453,12 +452,16 @@ function DirectMessagesContent() {
   const handleWSPresenceUpdated = useCallback((payload: WSEventPayload) => {
     const pData = payload as any;
     const targetUserId = pData.user_id || pData.presence?.user_id;
-    const newStatus = pData.status || pData.presence?.status;
+    const newStatus = pData.status || pData.presence?.status || 'online';
     const newLastSeen = pData.last_seen || pData.presence?.last_seen;
 
-    if (targetUserId && newStatus) {
+    if (targetUserId) {
       setConversations(prev => prev.map(c => {
-        if (c.type === 'private' && c.participant && (c.participant.id === targetUserId || (c as any).participant_one === targetUserId || (c as any).participant_two === targetUserId)) {
+        if (c.type === 'private' && c.participant && (
+          isSameId(c.participant.id, targetUserId) ||
+          isSameId((c as any).participant_one, targetUserId) ||
+          isSameId((c as any).participant_two, targetUserId)
+        )) {
           return {
             ...c,
             participant: {
@@ -471,7 +474,7 @@ function DirectMessagesContent() {
         return c;
       }));
     }
-  }, []);
+  }, [isSameId]);
 
   const handleGroupUpdatedWS = useCallback((payload?: WSEventPayload) => {
     if (payload?.event === 'group_deleted' || payload?.event === 'group.deleted') {

@@ -52,6 +52,7 @@ import { ErrorBoundary } from './shared/components/ErrorBoundary';
 import { CognitiveAgentsPage } from './features/cognitive-agents/components/CognitiveAgentsPage';
 import { SEO } from './shared/components/SEO';
 import { LandingPage } from './components/landing/LandingPage';
+import { WebSocketProvider } from './features/direct-messages/WebSocketContext';
 
 
 
@@ -510,7 +511,7 @@ function App() {
 
 
   return (
-    <>
+    <WebSocketProvider>
       <CommandPalette onNavigate={setActiveTab} />
       <DashboardLayout
         theme={theme}
@@ -683,7 +684,7 @@ function App() {
 
       <UniversalSearchModal />
     </DashboardLayout>
-    </>
+    </WebSocketProvider>
   );
 }
 
