@@ -10,7 +10,7 @@ export function useTyping(conversationId: string | null) {
   const { sendEvent, subscribe } = useWebSocket();
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const isTypingRef = useRef(false);
-  const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!conversationId) return;

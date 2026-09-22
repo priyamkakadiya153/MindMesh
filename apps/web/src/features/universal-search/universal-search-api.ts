@@ -25,7 +25,7 @@ export interface SearchResultItem {
 }
 
 export interface SearchQueryResponse {
-  query: str;
+  query: string;
   mode: string;
   total_results: number;
   grouped_results: Record<string, SearchResultItem[]>;

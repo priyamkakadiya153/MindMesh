@@ -27,8 +27,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const wsRef = useRef<WebSocket | null>(null);
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map());
   const reconnectAttemptRef = useRef(0);
-  const heartbeatTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const subscribe = useCallback((event: string, callback: EventCallback) => {
     if (!listenersRef.current.has(event)) {

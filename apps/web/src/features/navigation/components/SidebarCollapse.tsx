@@ -9,7 +9,7 @@ interface SidebarCollapseProps {
 
 export function SidebarCollapse({ collapsed, onToggle, isMobile = false }: SidebarCollapseProps) {
   const [showTooltip, setShowTooltip] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMouseEnter = () => {
     if (isMobile) return;
