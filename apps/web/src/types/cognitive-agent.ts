@@ -82,18 +82,23 @@ export interface CognitiveAgentOutput {
 }
 
 export interface CognitiveAgentExecution {
-  execution_id: string;
+  id?: string;
+  execution_id?: string;
   agent_id: string;
   organization_id: string;
   workspace_id?: string;
-  trigger_source: CognitiveAgentTriggerType;
+  triggered_by?: string;
+  trigger_source?: CognitiveAgentTriggerType;
+  trigger_type?: string;
   started_at: string;
   completed_at?: string;
   input_context?: Record<string, any>;
+  output_summary?: string;
   outputs?: CognitiveAgentOutput[];
   action_candidates_generated: number;
   status: CognitiveAgentExecutionStatus;
   error_message?: string;
+  created_at?: string;
 }
 
 export interface CognitiveAgent {

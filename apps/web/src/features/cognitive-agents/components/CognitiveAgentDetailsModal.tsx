@@ -462,39 +462,43 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
               <p className="text-xs text-textMuted italic pt-1">No execution history recorded yet.</p>
             ) : (
               <div className="space-y-2 pt-1 max-h-56 overflow-y-auto custom-scrollbar">
-                {executions.map(ex => (
-                  <div key={ex.id} className="p-2.5 bg-bgCard border border-borderMuted rounded-xl space-y-1.5 text-xs hover:border-borderColor transition-all">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-md ${
-                          ex.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                          ex.status === 'RUNNING' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                          ex.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                          'bg-slate-500/10 text-slate-400 border border-slate-500/20'
-                        }`}>
-                          {ex.status}
-                        </span>
-                        <span className="text-[11px] font-mono text-textMuted">{ex.trigger_type}</span>
+                {executions.map((ex, idx) => {
+                  const execId = ex.id || ex.execution_id || `exec-${idx}`;
+                  const trigger = ex.trigger_type || ex.trigger_source || 'MANUAL';
+                  return (
+                    <div key={execId} className="p-2.5 bg-bgCard border border-borderMuted rounded-xl space-y-1.5 text-xs hover:border-borderColor transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-md ${
+                            ex.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            ex.status === 'RUNNING' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                            ex.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                            'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                          }`}>
+                            {ex.status}
+                          </span>
+                          <span className="text-[11px] font-mono text-textMuted">{trigger}</span>
+                        </div>
+                        <span className="text-[10px] text-textMuted">{new Date(ex.started_at).toLocaleTimeString()}</span>
                       </div>
-                      <span className="text-[10px] text-textMuted">{new Date(ex.started_at).toLocaleTimeString()}</span>
-                    </div>
 
-                    {ex.error_message ? (
-                      <p className="text-red-400 text-[11px] bg-red-500/10 p-1.5 rounded-md border border-red-500/20">
-                        {ex.error_message}
-                      </p>
-                    ) : ex.output_summary ? (
-                      <p className="text-textSecondary text-[11px] line-clamp-2 italic">
-                        "{ex.output_summary}"
-                      </p>
-                    ) : null}
+                      {ex.error_message ? (
+                        <p className="text-red-400 text-[11px] bg-red-500/10 p-1.5 rounded-md border border-red-500/20">
+                          {ex.error_message}
+                        </p>
+                      ) : ex.output_summary ? (
+                        <p className="text-textSecondary text-[11px] line-clamp-2 italic">
+                          "{ex.output_summary}"
+                        </p>
+                      ) : null}
 
-                    <div className="flex items-center justify-between pt-1 border-t border-borderMuted text-[10px] text-textMuted font-mono">
-                      <span>ID: {ex.id.slice(0, 8)}</span>
-                      <span>{new Date(ex.started_at).toLocaleDateString()}</span>
+                      <div className="flex items-center justify-between pt-1 border-t border-borderMuted text-[10px] text-textMuted font-mono">
+                        <span>ID: {execId.slice(0, 8)}</span>
+                        <span>{new Date(ex.started_at).toLocaleDateString()}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

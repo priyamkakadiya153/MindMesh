@@ -2,7 +2,10 @@ import {
   CognitiveAgent,
   CognitiveAgentCreate,
   CognitiveAgentUpdate,
-  CognitiveAgentExecution
+  CognitiveAgentExecution,
+  CognitiveAgentOutput,
+  CognitiveAgentTriggerRecord,
+  CognitiveAgentOutputRecord
 } from '../../../types/cognitive-agent';
 
 import { getApiBase } from '../../../lib/api-client';
