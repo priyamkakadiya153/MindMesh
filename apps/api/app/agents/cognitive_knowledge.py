@@ -87,15 +87,14 @@ class CognitiveAgentKnowledgeService:
         # 4. Fetch Authorized Conversations
         conv_stmt = select(Conversation).where(
             Conversation.organization_id == organization_id,
-            Conversation.workspace_id == workspace_id,
+            or_(Conversation.workspace_id == workspace_id, Conversation.workspace_id.is_(None)),
             Conversation.deleted_at.is_(None),
             or_(
                 Conversation.participant_one == current_user.id,
                 Conversation.participant_two == current_user.id,
                 Conversation.id.in_(
                     select(ConversationMember.conversation_id).where(
-                        ConversationMember.user_id == current_user.id,
-                        ConversationMember.deleted_at.is_(None)
+                        ConversationMember.user_id == current_user.id
                     )
                 )
             )
