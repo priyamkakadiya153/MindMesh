@@ -18,8 +18,8 @@ from app.agents.cognitive_knowledge import CognitiveAgentKnowledgeService
 from app.agents.cognitive_actionability import CognitiveAgentActionabilityService
 from app.agents.cognitive_memory import CognitiveAgentMemoryService
 from app.agents.cognitive_audit import CognitiveAgentAuditService
-from app.ai.gateway.gateway import AIGateway
-from app.ai.gateway.models import AIRequest, AIResponseStatus
+from app.ai.llm.factory import LLMProviderFactory
+from app.ai.llm.base import LLMSettings, UnifiedLLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -272,27 +272,30 @@ class CognitiveAgentExecutionEngine:
                 f"{data_context_str}"
             )
 
-            # 8. Call MindMesh Central AI Gateway
-            gateway = AIGateway(db=db)
-            ai_req = AIRequest(
-                user_id=current_user.id,
-                workspace_id=workspace_id,
-                organization_id=organization_id,
-                message=prompt_user_message,
-                system_context=system_prompt
-            )
+            # 8. Call LLM Provider via Factory
+            try:
+                llm_settings = LLMSettings(
+                    provider="gemini",
+                    model="gemini-1.5-flash",
+                    temperature=0.2,
+                    max_tokens=1500
+                )
+                llm_resp = await LLMProviderFactory.generate_with_failover(
+                    prompt=prompt_user_message,
+                    system_prompt=system_prompt,
+                    settings=llm_settings
+                )
+                raw_content = (llm_resp.content or "").strip()
+            except Exception as llm_ex:
+                logger.warning(f"[CognitiveEngine] LLM invocation warning: {llm_ex}")
+                raw_content = ""
 
-            ai_resp = await gateway.execute(ai_req)
-
-            if ai_resp.status == AIResponseStatus.FAILED or ai_resp.error:
-                error_msg = ai_resp.error.message if ai_resp.error else "AI provider invocation failed."
+            if not raw_content:
                 execution.status = "FAILED"
                 execution.completed_at = datetime.utcnow()
-                execution.error_message = error_msg
+                execution.error_message = "AI provider returned empty response or failed."
                 await db.commit()
                 return execution, None
-
-            raw_content = (ai_resp.content or "").strip()
 
             # 9. Validate & Parse Structured Response
             output_type = "INSIGHT"
