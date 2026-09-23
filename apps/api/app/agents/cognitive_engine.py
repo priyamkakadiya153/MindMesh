@@ -272,20 +272,20 @@ class CognitiveAgentExecutionEngine:
                 f"{data_context_str}"
             )
 
-            # 8. Call LLM Provider via Factory
+            # 8. Call LLM Provider directly via GeminiProvider
             try:
-                llm_settings = LLMSettings(
-                    provider="gemini",
-                    model="gemini-1.5-flash",
-                    temperature=0.2,
-                    max_tokens=1500
+                from app.ai.llm.gemini import GeminiProvider
+                from app.ai.gateway.models import AIRequest
+                provider = GeminiProvider(model_name="gemini-2.5-flash")
+                ai_req = AIRequest(
+                    user_id=current_user.id,
+                    workspace_id=workspace_id,
+                    organization_id=organization_id,
+                    message=prompt_user_message,
+                    system_context=system_prompt
                 )
-                llm_resp = await LLMProviderFactory.generate_with_failover(
-                    prompt=prompt_user_message,
-                    system_prompt=system_prompt,
-                    settings=llm_settings
-                )
-                raw_content = (llm_resp.content or "").strip()
+                ai_resp = await provider.generate_response(ai_req)
+                raw_content = (ai_resp.content or "").strip()
             except Exception as llm_ex:
                 logger.warning(f"[CognitiveEngine] LLM invocation warning: {llm_ex}")
                 raw_content = ""
@@ -344,26 +344,33 @@ class CognitiveAgentExecutionEngine:
             db.add(output)
 
             # 11. Evaluate Actionability & Surface Action Inbox Candidates (CA-08 / AUTO-09)
-            candidates = await CognitiveAgentActionabilityService.evaluate_and_create_candidates(
-                db=db,
-                agent=agent,
-                execution=execution,
-                output=output,
-                current_user=current_user,
-                organization_id=organization_id,
-                workspace_id=workspace_id
-            )
+            candidates = []
+            try:
+                candidates = await CognitiveAgentActionabilityService.evaluate_and_create_candidates(
+                    db=db,
+                    agent=agent,
+                    execution=execution,
+                    output=output,
+                    current_user=current_user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id
+                )
+            except Exception as can_err:
+                logger.warning(f"[CognitiveEngine] Actionability evaluation warning: {can_err}")
 
             # 12. Extract & Persist Durable Agent Memory (CA-09)
-            await CognitiveAgentMemoryService.extract_and_persist_memories(
-                db=db,
-                agent=agent,
-                execution=execution,
-                output=output,
-                current_user=current_user,
-                organization_id=organization_id,
-                workspace_id=workspace_id
-            )
+            try:
+                await CognitiveAgentMemoryService.extract_and_persist_memories(
+                    db=db,
+                    agent=agent,
+                    execution=execution,
+                    output=output,
+                    current_user=current_user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id
+                )
+            except Exception as mem_err:
+                logger.warning(f"[CognitiveEngine] Memory extraction warning: {mem_err}")
 
             # 13. Finalize Execution Record to COMPLETED
             execution.status = "COMPLETED"
@@ -376,16 +383,19 @@ class CognitiveAgentExecutionEngine:
             await db.refresh(output)
 
             # 14. Record Audit Event (AUTO-07 / CA-09)
-            await CognitiveAgentAuditService.record_agent_event(
-                db=db,
-                user=current_user,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                event_type="EXECUTED",
-                agent_id=agent.id,
-                target_id=str(execution.id),
-                after_state={"execution_id": str(execution.id), "output_id": str(output.id), "status": "COMPLETED", "candidates": len(candidates)}
-            )
+            try:
+                await CognitiveAgentAuditService.record_agent_event(
+                    db=db,
+                    user=current_user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    event_type="EXECUTED",
+                    agent_id=agent.id,
+                    target_id=str(execution.id),
+                    after_state={"execution_id": str(execution.id), "output_id": str(output.id), "status": "COMPLETED", "candidates": len(candidates)}
+                )
+            except Exception as audit_err:
+                logger.warning(f"[CognitiveEngine] Audit log warning: {audit_err}")
 
             return execution, output
 
@@ -400,21 +410,24 @@ class CognitiveAgentExecutionEngine:
             if failed_ex:
                 failed_ex.status = "FAILED"
                 failed_ex.completed_at = datetime.utcnow()
-                err_str = f"Execution failed: {str(exc)}" if str(exc) else "An internal execution error occurred."
+                err_str = f"Execution failed: {type(exc).__name__}: {str(exc)}" if str(exc) else f"Execution failed: {type(exc).__name__}"
                 failed_ex.error_message = err_str
                 await db.commit()
 
                 # Audit Failed Execution
-                await CognitiveAgentAuditService.record_agent_event(
-                    db=db,
-                    user=current_user,
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                    event_type="EXECUTION_FAILED",
-                    agent_id=agent_id,
-                    target_id=str(exec_id),
-                    after_state={"execution_id": str(exec_id), "status": "FAILED", "error": err_str}
-                )
+                try:
+                    await CognitiveAgentAuditService.record_agent_event(
+                        db=db,
+                        user=current_user,
+                        organization_id=organization_id,
+                        workspace_id=workspace_id,
+                        event_type="EXECUTION_FAILED",
+                        agent_id=agent_id,
+                        target_id=str(exec_id),
+                        after_state={"execution_id": str(exec_id), "status": "FAILED", "error": err_str}
+                    )
+                except Exception as audit_err:
+                    logger.warning(f"[CognitiveEngine] Audit log warning on failure: {audit_err}")
 
                 return failed_ex, None
             raise
