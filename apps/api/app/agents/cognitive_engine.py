@@ -397,19 +397,20 @@ class CognitiveAgentExecutionEngine:
             if failed_ex:
                 failed_ex.status = "FAILED"
                 failed_ex.completed_at = datetime.utcnow()
-                failed_ex.error_message = safe_error_message(exc)
+                err_str = f"Execution failed: {str(exc)}" if str(exc) else "An internal execution error occurred."
+                failed_ex.error_message = err_str
                 await db.commit()
 
                 # Audit Failed Execution
                 await CognitiveAgentAuditService.record_agent_event(
                     db=db,
-                    user=current_user_id,
+                    user=current_user,
                     organization_id=organization_id,
                     workspace_id=workspace_id,
                     event_type="EXECUTION_FAILED",
                     agent_id=agent_id,
                     target_id=str(exec_id),
-                    after_state={"execution_id": str(exec_id), "status": "FAILED", "error": safe_error_message(exc)}
+                    after_state={"execution_id": str(exec_id), "status": "FAILED", "error": err_str}
                 )
 
                 return failed_ex, None

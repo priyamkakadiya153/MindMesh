@@ -4,7 +4,7 @@ MindMesh — Cognitive Agent REST API Router (CA-02)
 Exposes isolated endpoints for CRUD operations on Cognitive Agents, Executions, and Outputs.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
