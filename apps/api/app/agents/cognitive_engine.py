@@ -13,7 +13,7 @@ from app.models.user import User
 from app.models.cognitive_agent import CognitiveAgent, CognitiveAgentExecution, CognitiveAgentOutput
 from app.processing.models import DocumentContent
 from app.ai.embeddings.models import DocumentChunk
-from app.models.messages import Message
+from app.models.message import Message
 from app.agents.cognitive_knowledge import CognitiveAgentKnowledgeService
 from app.agents.cognitive_actionability import CognitiveAgentActionabilityService
 from app.agents.cognitive_memory import CognitiveAgentMemoryService
