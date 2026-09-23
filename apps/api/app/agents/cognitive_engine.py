@@ -13,7 +13,7 @@ from app.models.user import User
 from app.models.cognitive_agent import CognitiveAgent, CognitiveAgentExecution, CognitiveAgentOutput
 from app.processing.models import DocumentContent
 from app.ai.embeddings.models import DocumentChunk
-from app.models.message import Message
+from app.models.conversations import DirectMessage
 from app.agents.cognitive_knowledge import CognitiveAgentKnowledgeService
 from app.agents.cognitive_actionability import CognitiveAgentActionabilityService
 from app.agents.cognitive_memory import CognitiveAgentMemoryService
@@ -217,14 +217,14 @@ class CognitiveAgentExecutionEngine:
                 # Retrieve recent messages
                 conv_msgs_str = ""
                 try:
-                    msg_stmt = select(Message).where(
-                        Message.conversation_id == conv_id_uuid,
-                        Message.deleted_at.is_(None)
-                    ).order_by(Message.created_at.desc()).limit(15)
+                    msg_stmt = select(DirectMessage).where(
+                        DirectMessage.conversation_id == conv_id_uuid,
+                        DirectMessage.deleted == False
+                    ).order_by(DirectMessage.created_at.desc()).limit(15)
                     msg_res = await db.execute(msg_stmt)
                     msgs = list(reversed(msg_res.scalars().all()))
                     if msgs:
-                        conv_msgs_str = "\n".join([f"- {m.sender_id}: {m.content}" for m in msgs if m.content])
+                        conv_msgs_str = "\n".join([f"- User {str(m.sender_id)[:8]}: {m.content}" for m in msgs if m.content])
                 except Exception as ex:
                     logger.warning(f"Error fetching messages for conversation {conv_id_uuid}: {ex}")
 
@@ -419,5 +419,7 @@ def safe_error_message(exc: Exception) -> str:
     err_str = str(exc)
     if "Provider Connection Error" in err_str or "Rate Limit" in err_str:
         return f"AI Execution Error: {err_str}"
+    if err_str:
+        return f"Execution Error: {err_str}"
     return "An internal execution error occurred."
 
