@@ -17,7 +17,7 @@ import {
   Trash2,
   Loader2
 } from 'lucide-react';
-import { CognitiveAgent, CognitiveAgentTriggerRecord, CognitiveAgentOutputRecord } from '../../../types/cognitive-agent';
+import { CognitiveAgent, CognitiveAgentTriggerRecord, CognitiveAgentOutputRecord, CognitiveAgentExecution } from '../../../types/cognitive-agent';
 import { useAuthStore } from '../../auth/auth-store';
 import * as api from '../api/cognitive-agent-api';
 import { AddTriggerModal } from './AddTriggerModal';
@@ -47,24 +47,49 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
   const [executing, setExecuting] = useState(false);
   const [triggers, setTriggers] = useState<CognitiveAgentTriggerRecord[]>([]);
   const [outputs, setOutputs] = useState<CognitiveAgentOutputRecord[]>([]);
+  const [executions, setExecutions] = useState<CognitiveAgentExecution[]>([]);
   const [selectedOutput, setSelectedOutput] = useState<CognitiveAgentOutputRecord | null>(null);
   const [loadingTriggers, setLoadingTriggers] = useState(false);
   const [loadingOutputs, setLoadingOutputs] = useState(false);
+  const [loadingExecutions, setLoadingExecutions] = useState(false);
   const [isAddTriggerOpen, setIsAddTriggerOpen] = useState(false);
+
+  const loadAllData = async () => {
+    if (!token || !currentOrg?.id || !agent) return;
+    try {
+      const [tData, oData, eData] = await Promise.all([
+        api.fetchAgentTriggers(token, currentOrg.id, agent.id).catch(() => []),
+        api.fetchAgentOutputs(token, currentOrg.id, agent.id).catch(() => []),
+        api.fetchAgentExecutions(token, currentOrg.id, agent.id).catch(() => [])
+      ]);
+      setTriggers(tData);
+      setOutputs(oData);
+      setExecutions(eData);
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (isOpen && agent && token && currentOrg?.id) {
       setLoadingTriggers(true);
+      setLoadingOutputs(true);
+      setLoadingExecutions(true);
+
       api.fetchAgentTriggers(token, currentOrg.id, agent.id)
         .then(setTriggers)
         .catch(() => setTriggers([]))
         .finally(() => setLoadingTriggers(false));
 
-      setLoadingOutputs(true);
       api.fetchAgentOutputs(token, currentOrg.id, agent.id)
         .then(setOutputs)
         .catch(() => setOutputs([]))
         .finally(() => setLoadingOutputs(false));
+
+      api.fetchAgentExecutions(token, currentOrg.id, agent.id)
+        .then(setExecutions)
+        .catch(() => setExecutions([]))
+        .finally(() => setLoadingExecutions(false));
     }
   }, [isOpen, agent?.id, token, currentOrg?.id]);
 
@@ -105,6 +130,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
     setExecuting(true);
     try {
       await onExecute(agent);
+      await loadAllData();
     } finally {
       setExecuting(false);
     }
@@ -136,7 +162,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className="w-full max-w-2xl bg-bgDialog border border-borderColor p-6 rounded-2xl shadow-2xl font-outfit text-textPrimary space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-3xl bg-bgDialog border border-borderColor p-6 rounded-2xl shadow-2xl font-outfit text-textPrimary space-y-5 max-h-[90vh] overflow-y-auto custom-scrollbar">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-borderMuted pb-4">
           <div className="flex items-center gap-3">
@@ -260,7 +286,27 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
               <Activity className="w-3.5 h-3.5" />
               <span className="text-[10px] uppercase font-semibold">Execution</span>
             </div>
-            <p className="font-medium text-textMuted">Not run yet</p>
+            <p className="font-medium">
+              {executions.length > 0 ? (
+                <span className={`text-xs font-semibold ${
+                  executions[0].status === 'COMPLETED' ? 'text-emerald-400' :
+                  executions[0].status === 'RUNNING' ? 'text-blue-400' :
+                  executions[0].status === 'FAILED' ? 'text-red-400' : 'text-textSecondary'
+                }`}>
+                  {executions[0].status}
+                </span>
+              ) : agent.last_execution_status ? (
+                <span className={`text-xs font-semibold ${
+                  agent.last_execution_status === 'COMPLETED' ? 'text-emerald-400' :
+                  agent.last_execution_status === 'RUNNING' ? 'text-blue-400' :
+                  agent.last_execution_status === 'FAILED' ? 'text-red-400' : 'text-textSecondary'
+                }`}>
+                  {agent.last_execution_status}
+                </span>
+              ) : (
+                <span className="text-textMuted text-xs">Not run yet</span>
+              )}
+            </p>
           </div>
         </div>
 
@@ -275,8 +321,8 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
           </div>
         </div>
 
-        {/* Scope & Triggers & Execution Status Placeholders */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Knowledge Scope & Triggers */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {/* Knowledge Scope */}
           <div className="p-3.5 bg-bgInput/50 rounded-xl border border-borderMuted space-y-1.5">
             <div className="flex items-center justify-between">
@@ -293,7 +339,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
                 <p className="text-textMuted text-[11px] italic">No knowledge scope configured. Agent has 0 access.</p>
               )}
               {agent.knowledge_scope?.scope_type === 'WORKSPACE' && (
-                <p className="text-[11px]">Bound to entire workspace authorized knowledge.</p>
+                <p className="text-[11px]">Bound to entire workspace authorized knowledge (Documents, Projects, Discussions).</p>
               )}
               {agent.knowledge_scope?.scope_type === 'PROJECT' && (
                 <p className="text-[11px]">Scoped to Project ID: {agent.knowledge_scope.project_id || 'None'}</p>
@@ -337,7 +383,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
             ) : triggers.length === 0 ? (
               <p className="text-xs text-textMuted italic pt-1">No automatic triggers configured. Agent runs on manual trigger.</p>
             ) : (
-              <div className="space-y-2 pt-1">
+              <div className="space-y-2 pt-1 max-h-40 overflow-y-auto custom-scrollbar">
                 {triggers.map(t => (
                   <div key={t.id} className="p-2.5 bg-bgCard border border-borderMuted rounded-xl flex items-center justify-between text-xs">
                     <div className="space-y-0.5">
@@ -357,10 +403,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
                       <div className="text-[11px] text-textMuted flex items-center gap-3 pt-0.5">
                         <span>Timezone: <strong className="text-textSecondary">{t.timezone}</strong></span>
                         {t.next_run_at && (
-                          <span>Next run: <strong className="text-accentText">{new Date(t.next_run_at).toLocaleString()}</strong></span>
-                        )}
-                        {t.last_run_at && (
-                          <span>Last run: <strong className="text-textSecondary">{new Date(t.last_run_at).toLocaleString()}</strong></span>
+                          <span>Next: <strong className="text-accentText">{new Date(t.next_run_at).toLocaleTimeString()}</strong></span>
                         )}
                       </div>
                     </div>
@@ -397,6 +440,64 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
               </div>
             )}
           </div>
+        </div>
+
+        {/* Execution History & Persistent Outputs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Run / Execution History */}
+          <div className="p-3.5 bg-bgInput/50 rounded-xl border border-borderMuted space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-textMuted">
+                <Clock className="w-3.5 h-3.5 text-accent" />
+                <h5 className="text-[11px] font-bold uppercase tracking-wider text-textSecondary">Execution History ({executions.length})</h5>
+              </div>
+            </div>
+
+            {loadingExecutions ? (
+              <div className="py-4 text-center text-textMuted text-xs flex items-center justify-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+                Loading execution history...
+              </div>
+            ) : executions.length === 0 ? (
+              <p className="text-xs text-textMuted italic pt-1">No execution history recorded yet.</p>
+            ) : (
+              <div className="space-y-2 pt-1 max-h-56 overflow-y-auto custom-scrollbar">
+                {executions.map(ex => (
+                  <div key={ex.id} className="p-2.5 bg-bgCard border border-borderMuted rounded-xl space-y-1.5 text-xs hover:border-borderColor transition-all">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-md ${
+                          ex.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                          ex.status === 'RUNNING' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                          ex.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                          'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                        }`}>
+                          {ex.status}
+                        </span>
+                        <span className="text-[11px] font-mono text-textMuted">{ex.trigger_type}</span>
+                      </div>
+                      <span className="text-[10px] text-textMuted">{new Date(ex.started_at).toLocaleTimeString()}</span>
+                    </div>
+
+                    {ex.error_message ? (
+                      <p className="text-red-400 text-[11px] bg-red-500/10 p-1.5 rounded-md border border-red-500/20">
+                        {ex.error_message}
+                      </p>
+                    ) : ex.output_summary ? (
+                      <p className="text-textSecondary text-[11px] line-clamp-2 italic">
+                        "{ex.output_summary}"
+                      </p>
+                    ) : null}
+
+                    <div className="flex items-center justify-between pt-1 border-t border-borderMuted text-[10px] text-textMuted font-mono">
+                      <span>ID: {ex.id.slice(0, 8)}</span>
+                      <span>{new Date(ex.started_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Persistent Agent Outputs */}
           <div className="p-3.5 bg-bgInput/50 rounded-xl border border-borderMuted space-y-2.5">
@@ -415,7 +516,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
             ) : outputs.length === 0 ? (
               <p className="text-xs text-textMuted italic pt-1">No execution outputs generated yet.</p>
             ) : (
-              <div className="space-y-2 pt-1">
+              <div className="space-y-2 pt-1 max-h-56 overflow-y-auto custom-scrollbar">
                 {outputs.map(out => (
                   <div key={out.id} className="p-3 bg-bgCard border border-borderMuted rounded-xl space-y-2 text-xs hover:border-borderColor transition-all">
                     <div className="flex items-center justify-between">
@@ -423,7 +524,7 @@ export const CognitiveAgentDetailsModal: React.FC<CognitiveAgentDetailsModalProp
                         <span className="px-2 py-0.5 text-[9px] font-bold uppercase rounded-md bg-accentSubtle text-accent border border-accent/20">
                           {out.output_type}
                         </span>
-                        <h6 className="font-semibold text-textPrimary text-xs">{out.title}</h6>
+                        <h6 className="font-semibold text-textPrimary text-xs truncate max-w-[140px]">{out.title}</h6>
                       </div>
                       <span className="text-[10px] text-textMuted">{new Date(out.created_at).toLocaleDateString()}</span>
                     </div>

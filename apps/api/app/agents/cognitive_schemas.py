@@ -51,6 +51,8 @@ class CognitiveAgentResponse(BaseModel):
     enabled: bool
     knowledge_scope: Optional[Dict[str, Any]] = None
     triggers: Optional[List[Dict[str, Any]]] = None
+    last_execution_status: Optional[str] = None
+    last_executed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

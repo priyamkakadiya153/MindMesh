@@ -409,6 +409,20 @@ export async function deleteAgentMemory(
   return data.success;
 }
 
+export async function fetchAgentExecutions(
+  token: string,
+  orgId: string,
+  agentId: string
+): Promise<CognitiveAgentExecution[]> {
+  const res = await fetch(`${API_BASE_URL}/cognitive-agents/${agentId}/executions`, {
+    method: 'GET',
+    headers: getAuthHeaders(token, orgId)
+  });
 
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to fetch agent executions');
+  }
 
-
+  return res.json();
+}

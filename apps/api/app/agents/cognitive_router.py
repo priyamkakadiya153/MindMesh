@@ -9,6 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+from app.models.cognitive_agent import CognitiveAgentExecution
 from app.core.database import get_db_session
 from app.api.dependencies import get_current_user
 from app.authorization.organization_resolver import resolve_organization_id
@@ -28,6 +30,20 @@ from app.agents.cognitive_schemas import (
 router = APIRouter(prefix="/cognitive-agents", tags=["Cognitive Agents Persistence Layer"])
 
 
+async def _enrich_agent_response(db: AsyncSession, agent: Any, org_uuid: UUID) -> CognitiveAgentResponse:
+    resp = CognitiveAgentResponse.model_validate(agent)
+    stmt_exec = select(CognitiveAgentExecution).where(
+        CognitiveAgentExecution.agent_id == agent.id,
+        CognitiveAgentExecution.organization_id == org_uuid
+    ).order_by(CognitiveAgentExecution.started_at.desc()).limit(1)
+    exec_res = await db.execute(stmt_exec)
+    latest_exec = exec_res.scalar_one_or_none()
+    if latest_exec:
+        resp.last_execution_status = latest_exec.status
+        resp.last_executed_at = latest_exec.completed_at or latest_exec.started_at
+    return resp
+
+
 @router.post("", response_model=CognitiveAgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_cognitive_agent(
     payload: CognitiveAgentCreate,
@@ -43,7 +59,7 @@ async def create_cognitive_agent(
         organization_id=org_uuid,
         payload=payload
     )
-    return agent
+    return await _enrich_agent_response(db, agent, org_uuid)
 
 
 @router.get("", response_model=List[CognitiveAgentResponse], status_code=status.HTTP_200_OK)
@@ -60,7 +76,7 @@ async def list_cognitive_agents(
         organization_id=org_uuid,
         workspace_id=workspace_id
     )
-    return agents
+    return [await _enrich_agent_response(db, a, org_uuid) for a in agents]
 
 
 @router.get("/{id}", response_model=CognitiveAgentResponse, status_code=status.HTTP_200_OK)
@@ -77,7 +93,7 @@ async def get_cognitive_agent_details(
         agent_id=id,
         organization_id=org_uuid
     )
-    return agent
+    return await _enrich_agent_response(db, agent, org_uuid)
 
 
 @router.patch("/{id}", response_model=CognitiveAgentResponse, status_code=status.HTTP_200_OK)
@@ -97,7 +113,7 @@ async def update_cognitive_agent(
         organization_id=org_uuid,
         payload=payload
     )
-    return agent
+    return await _enrich_agent_response(db, agent, org_uuid)
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)

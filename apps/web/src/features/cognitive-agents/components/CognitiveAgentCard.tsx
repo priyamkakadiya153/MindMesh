@@ -113,12 +113,24 @@ export const CognitiveAgentCard: React.FC<CognitiveAgentCardProps> = ({
         <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
           <div className="flex items-center gap-1.5 text-textMuted">
             <Layers className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Scope: Workspace</span>
+            <span className="truncate">Scope: {agent.knowledge_scope?.scope_type || 'Workspace'}</span>
           </div>
 
           <div className="flex items-center gap-1.5 text-textMuted">
             <Activity className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Status: Not run yet</span>
+            <span className="truncate">
+              Execution: {agent.last_execution_status ? (
+                <span className={
+                  agent.last_execution_status === 'COMPLETED' ? 'text-emerald-400 font-semibold' :
+                  agent.last_execution_status === 'RUNNING' ? 'text-blue-400 font-semibold' :
+                  agent.last_execution_status === 'FAILED' ? 'text-red-400 font-semibold' : 'text-textSecondary font-semibold'
+                }>
+                  {agent.last_execution_status}
+                </span>
+              ) : (
+                'Not run yet'
+              )}
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5 text-textMuted">

@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.models.cognitive_agent import CognitiveAgent, CognitiveAgentExecution, CognitiveAgentOutput
+from app.processing.models import DocumentContent
+from app.ai.embeddings.models import DocumentChunk
+from app.models.messages import Message
 from app.agents.cognitive_knowledge import CognitiveAgentKnowledgeService
 from app.agents.cognitive_actionability import CognitiveAgentActionabilityService
 from app.agents.cognitive_memory import CognitiveAgentMemoryService
@@ -150,22 +153,57 @@ class CognitiveAgentExecutionEngine:
                 context_blocks.append(f"[PROJECT: {p['name']} (ID: {p['id']})]\nDescription: {p.get('description', 'N/A')}\nStatus: {p.get('status', 'active')}")
 
             for d in documents:
+                doc_id_raw = d["id"]
+                try:
+                    doc_id_uuid = UUID(doc_id_raw) if isinstance(doc_id_raw, str) else doc_id_raw
+                except Exception:
+                    doc_id_uuid = doc_id_raw
+
                 doc_title = d.get("title") or d.get("filename") or "Document"
                 provenance.append({
                     "source_type": "document",
-                    "source_id": d["id"],
+                    "source_id": str(doc_id_uuid),
                     "title": doc_title,
                     "filename": d.get("filename"),
                     "mime_type": d.get("mime_type"),
                     "retrieved_at": now_iso
                 })
-                context_blocks.append(f"[DOCUMENT: {doc_title} (ID: {d['id']})]\nMIME: {d.get('mime_type')}\nSize: {d.get('size')} bytes")
+
+                # Retrieve extracted text content
+                doc_text = ""
+                try:
+                    content_stmt = select(DocumentContent.extracted_text).where(DocumentContent.document_id == doc_id_uuid)
+                    content_res = await db.execute(content_stmt)
+                    doc_text = content_res.scalar_one_or_none() or ""
+                except Exception as ex:
+                    logger.warning(f"Error fetching DocumentContent for {doc_id_uuid}: {ex}")
+
+                if not doc_text:
+                    try:
+                        chunk_stmt = select(DocumentChunk.content).where(DocumentChunk.document_id == doc_id_uuid).order_by(DocumentChunk.chunk_index).limit(20)
+                        chunk_res = await db.execute(chunk_stmt)
+                        chunks = chunk_res.scalars().all()
+                        if chunks:
+                            doc_text = "\n".join(chunks)
+                    except Exception as ex:
+                        logger.warning(f"Error fetching DocumentChunk for {doc_id_uuid}: {ex}")
+
+                content_preview = f"\nExtracted Document Content:\n{doc_text[:15000]}" if doc_text else "\n(No extracted text content available)"
+                context_blocks.append(
+                    f"[DOCUMENT: {doc_title} (ID: {d['id']})]\nFilename: {d.get('filename')}\nMIME: {d.get('mime_type')}\nSize: {d.get('size')} bytes{content_preview}"
+                )
 
             for c in conversations:
-                conv_title = c.get("title") or f"Conversation {c['id'][:8]}"
+                conv_id_raw = c["id"]
+                try:
+                    conv_id_uuid = UUID(conv_id_raw) if isinstance(conv_id_raw, str) else conv_id_raw
+                except Exception:
+                    conv_id_uuid = conv_id_raw
+
+                conv_title = c.get("title") or f"Conversation {str(conv_id_raw)[:8]}"
                 conv_item: Dict[str, Any] = {
                     "source_type": "conversation",
-                    "source_id": c["id"],
+                    "source_id": str(conv_id_uuid),
                     "title": conv_title,
                     "conversation_type": c.get("conversation_type"),
                     "retrieved_at": now_iso
@@ -175,7 +213,23 @@ class CognitiveAgentExecutionEngine:
                 if c.get("last_message_text"):
                     conv_item["message_text"] = c["last_message_text"]
                 provenance.append(conv_item)
-                context_blocks.append(f"[CONVERSATION: {conv_title} (ID: {c['id']})]\nType: {c.get('conversation_type')}")
+
+                # Retrieve recent messages
+                conv_msgs_str = ""
+                try:
+                    msg_stmt = select(Message).where(
+                        Message.conversation_id == conv_id_uuid,
+                        Message.deleted_at.is_(None)
+                    ).order_by(Message.created_at.desc()).limit(15)
+                    msg_res = await db.execute(msg_stmt)
+                    msgs = list(reversed(msg_res.scalars().all()))
+                    if msgs:
+                        conv_msgs_str = "\n".join([f"- {m.sender_id}: {m.content}" for m in msgs if m.content])
+                except Exception as ex:
+                    logger.warning(f"Error fetching messages for conversation {conv_id_uuid}: {ex}")
+
+                conv_preview = f"\nRecent Messages:\n{conv_msgs_str}" if conv_msgs_str else ""
+                context_blocks.append(f"[CONVERSATION: {conv_title} (ID: {c['id']})]\nType: {c.get('conversation_type')}{conv_preview}")
 
             data_context_str = "\n\n---\n\n".join(context_blocks)
 

@@ -112,6 +112,8 @@ export interface CognitiveAgent {
   created_at: string;
   updated_at: string;
   last_execution?: CognitiveAgentExecution | null;
+  last_execution_status?: string | null;
+  last_executed_at?: string | null;
 }
 
 export interface CognitiveAgentCreate {
