@@ -640,10 +640,16 @@ async def list_files(
         if user_conv_ids:
             stmt = stmt.where(
                 Attachment.uploaded_by != current_user.id,
-                Attachment.conversation_id.in_(user_conv_ids)
+                or_(
+                    Attachment.conversation_id.in_(user_conv_ids),
+                    Attachment.conversation_id == None
+                )
             )
         else:
-            stmt = stmt.where(Attachment.uploaded_by != current_user.id, Attachment.id == None)
+            stmt = stmt.where(
+                Attachment.uploaded_by != current_user.id,
+                Attachment.conversation_id == None
+            )
     elif sharing_filter == "shared_by_me":
         stmt = stmt.where(Attachment.uploaded_by == current_user.id)
     elif sharing_filter == "recent":
@@ -651,10 +657,27 @@ async def list_files(
     elif sharing_filter == "conversations":
         stmt = stmt.where(Attachment.conversation_id != None)
     elif sharing_filter == "projects":
-        stmt = stmt.where(or_(Attachment.folder_id != None, Attachment.workspace_id != None))
+        stmt = stmt.where(
+            Attachment.conversation_id == None,
+            or_(Attachment.folder_id != None, Attachment.workspace_id != None)
+        )
 
     if workspace_id:
-        stmt = stmt.where(or_(Attachment.workspace_id == workspace_id, Attachment.workspace_id == None))
+        if sharing_filter == "conversations":
+            # Direct conversation files are scoped to the conversation and organization
+            pass
+        elif sharing_filter == "shared_with_me":
+            stmt = stmt.where(or_(
+                Attachment.conversation_id != None,
+                Attachment.workspace_id == workspace_id,
+                Attachment.workspace_id == None
+            ))
+        else:
+            stmt = stmt.where(or_(
+                Attachment.workspace_id == workspace_id,
+                Attachment.workspace_id == None,
+                Attachment.conversation_id.in_(user_conv_ids) if user_conv_ids else False
+            ))
     if folder_id:
         stmt = stmt.where(Attachment.folder_id == folder_id)
     if conversation_id:
