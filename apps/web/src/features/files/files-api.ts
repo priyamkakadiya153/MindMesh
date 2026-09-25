@@ -97,11 +97,19 @@ export interface ShareRecipientItem {
   sharer_name?: string;
   sharer_email?: string;
   shared_with: string;
+  user_id?: string;
   recipient_name?: string;
   recipient_email?: string;
   permission: 'view' | 'edit' | 'admin';
   status: string;
   shared_at: string;
+}
+
+export interface ShareFileResponse {
+  status: string;
+  message: string;
+  shared_count: number;
+  shares: ShareRecipientItem[];
 }
 
 export interface ShareFilePayload {

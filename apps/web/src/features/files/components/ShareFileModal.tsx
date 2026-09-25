@@ -161,7 +161,8 @@ export function ShareFileModal({
         token
       );
 
-      setSuccessMessage(res.message || `File successfully shared with ${res.shared_count} member(s).`);
+      const count = res.shared_count ?? selectedMemberIds.length;
+      setSuccessMessage(res.message || `File successfully shared with ${count} member(s).`);
       setSelectedMemberIds([]);
       setCustomEmail('');
 
@@ -180,7 +181,7 @@ export function ShareFileModal({
     if (!file?.id) return;
     try {
       await revokeFileShare(file.id, recipientUserId, token);
-      setExistingShares((prev) => prev.filter((s) => s.shared_with !== recipientUserId));
+      setExistingShares((prev) => prev.filter((s) => s.shared_with !== recipientUserId && s.user_id !== recipientUserId));
       setSuccessMessage('Share access revoked.');
       if (onShareUpdated) onShareUpdated();
     } catch (err: any) {
@@ -269,11 +270,11 @@ export function ShareFileModal({
                   </div>
                 ) : (
                   filteredMembers.map((m) => {
-                    const uId = m.user_id || m.user?.id || m.id || '';
+                    const uId = m.user_id || m.id || m.user?.id || '';
                     const uEmail = m.email || m.user?.email || '';
-                    const uName = m.username || (m.user?.first_name ? `${m.user.first_name} ${m.user.last_name || ''}`.trim() : '') || uEmail;
+                    const uName = m.full_name || m.display_name || m.username || (m.first_name ? `${m.first_name} ${m.last_name || ''}`.trim() : '') || uEmail;
                     const isSelected = selectedMemberIds.includes(uId);
-                    const isAlreadyShared = existingShares.some((s) => s.shared_with === uId);
+                    const isAlreadyShared = existingShares.some((s) => s.shared_with === uId || s.user_id === uId);
 
                     return (
                       <div
@@ -287,7 +288,7 @@ export function ShareFileModal({
                       >
                         <div className="flex items-center space-x-2.5 min-w-0 pr-2">
                           <div className="w-7 h-7 rounded-full bg-bgCard border border-borderMuted text-textPrimary font-semibold text-xs flex items-center justify-center shrink-0">
-                            {uName.charAt(0).toUpperCase()}
+                            {(uName || 'M').charAt(0).toUpperCase()}
                           </div>
                           <div className="min-w-0 text-left">
                             <p className="font-semibold text-textPrimary truncate text-xs">{uName}</p>
@@ -395,29 +396,46 @@ export function ShareFileModal({
               </p>
             ) : (
               <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                {existingShares.map((s) => (
-                  <div
-                    key={s.id}
-                    className="p-2 bg-bgTertiary border border-borderMuted rounded-xl flex items-center justify-between text-xs"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="font-semibold text-textPrimary truncate">
-                        {s.recipient_name || s.recipient_email || 'Member'}
-                      </p>
-                      <p className="text-[10px] text-textMuted truncate">
-                        {s.recipient_email || s.shared_with} • {s.permission}
-                      </p>
-                    </div>
+                {existingShares.map((s) => {
+                  const name = s.recipient_name || s.recipient_email || 'Member';
+                  const email = s.recipient_email || '';
+                  const permLabel =
+                    s.permission === 'admin'
+                      ? 'Full access'
+                      : s.permission === 'edit'
+                      ? 'Can edit & version'
+                      : 'Can view & download';
+                  const recipientId = s.shared_with || s.user_id || s.id;
 
-                    <button
-                      onClick={() => handleRevokeShare(s.shared_with)}
-                      className="p-1.5 text-textMuted hover:text-rose-400 hover:bg-bgHover rounded-lg transition-colors"
-                      title="Revoke Access"
+                  return (
+                    <div
+                      key={s.id}
+                      className="p-2.5 bg-bgTertiary border border-borderMuted rounded-xl flex items-center justify-between text-xs"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                        <div className="w-7 h-7 rounded-full bg-accent/10 border border-accent/30 text-accent font-semibold text-xs flex items-center justify-center shrink-0">
+                          {(name || 'M').charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 text-left">
+                          <p className="font-semibold text-textPrimary truncate">{name}</p>
+                          <p className="text-[10px] text-textMuted truncate">
+                            {email ? `${email} • ` : ''}
+                            <span className="font-medium text-textSecondary">{permLabel}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRevokeShare(recipientId)}
+                        className="p-1.5 text-textMuted hover:text-rose-400 hover:bg-bgHover rounded-lg transition-colors"
+                        title="Revoke Access"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

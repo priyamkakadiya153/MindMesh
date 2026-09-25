@@ -82,8 +82,12 @@ async def test_attachment_user_to_user_sharing_flow(client, db_session: AsyncSes
     )
     assert share_res.status_code == 200, f"Share failed: status={share_res.status_code}, text={share_res.text}"
     share_json = share_res.json()
-    assert share_json["id"] == file_id
-    assert "User Two" in share_json.get("shared_with", [])
+    assert share_json["status"] == "success"
+    assert share_json["shared_count"] == 1
+    assert len(share_json["shares"]) == 1
+    assert share_json["shares"][0]["user_id"] == str(user2.id)
+    assert "User Two" in share_json["shares"][0]["recipient_name"]
+    assert "User Two" in share_json["message"]
 
     # Step 4: User 2 checks "Shared With Me" -> testing.pdf must appear!
     u2_res_after = await client.get(

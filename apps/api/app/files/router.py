@@ -84,13 +84,23 @@ class ShareFilePayload(BaseModel):
 class FileShareRecipientResponse(BaseModel):
     id: UUID
     attachment_id: UUID
+    shared_by: UUID
+    sharer_name: Optional[str] = None
+    sharer_email: Optional[str] = None
+    shared_with: UUID
     user_id: UUID
-    user_name: Optional[str] = None
-    email: Optional[str] = None
+    recipient_name: Optional[str] = None
+    recipient_email: Optional[str] = None
     avatar_url: Optional[str] = None
     permission: str
     status: str
     shared_at: datetime
+
+class ShareFileResponse(BaseModel):
+    status: str = "success"
+    message: str
+    shared_count: int
+    shares: List[FileShareRecipientResponse]
 
 class AttachmentVersionResponse(BaseModel):
     id: UUID
@@ -952,7 +962,7 @@ async def get_file_details(
     file_resps = await build_file_responses(db, [(att, uploader)], current_user.id)
     return file_resps[0]
 
-@router.post("/{id}/share", response_model=FileResponse)
+@router.post("/{id}/share", response_model=ShareFileResponse)
 async def share_file(
     id: UUID,
     payload: ShareFilePayload,
@@ -998,6 +1008,21 @@ async def share_file(
     org_mems_res = await db.execute(org_mems_stmt)
     valid_org_user_ids = set(org_mems_res.scalars().all())
 
+    # Fallback: if not found under attachment.organization_id directly, check any active organization current_user belongs to
+    if not valid_org_user_ids:
+        shared_orgs_stmt = select(OrganizationMember.user_id).where(
+            OrganizationMember.organization_id.in_(
+                select(OrganizationMember.organization_id).where(
+                    OrganizationMember.user_id == current_user.id,
+                    OrganizationMember.is_active == True
+                )
+            ),
+            OrganizationMember.user_id.in_(target_user_ids),
+            OrganizationMember.is_active == True
+        )
+        so_res = await db.execute(shared_orgs_stmt)
+        valid_org_user_ids = set(so_res.scalars().all())
+
     if not valid_org_user_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipients must be members of the organization.")
 
@@ -1010,14 +1035,16 @@ async def share_file(
     es_res = await db.execute(existing_shares_stmt)
     existing_shares_map = {s.shared_with: s for s in es_res.scalars().all()}
 
+    saved_shares = []
     notified_recipients = []
     for uid in valid_org_user_ids:
         if uid in existing_shares_map:
             s = existing_shares_map[uid]
             s.status = "active"
             s.shared_by = current_user.id
-            s.permission = payload.permission
+            s.permission = payload.permission or "view"
             s.shared_at = now
+            saved_shares.append(s)
         else:
             s = AttachmentShare(
                 id=uuid4(),
@@ -1026,16 +1053,43 @@ async def share_file(
                 workspace_id=payload.workspace_id or attachment.workspace_id,
                 shared_by=current_user.id,
                 shared_with=uid,
-                permission=payload.permission,
+                permission=payload.permission or "view",
                 source_type="direct",
                 status="active",
                 shared_at=now
             )
             db.add(s)
+            saved_shares.append(s)
         notified_recipients.append(str(uid))
 
     await log_audit_event(db, id, current_user.id, "share", request)
     await db.commit()
+
+    # Query recipient users
+    recip_stmt = select(User).where(User.id.in_(valid_org_user_ids))
+    recip_res = await db.execute(recip_stmt)
+    recip_map = {u.id: u for u in recip_res.scalars().all()}
+
+    shares_resp_list: List[FileShareRecipientResponse] = []
+    for s in saved_shares:
+        recip_user = recip_map.get(s.shared_with)
+        r_name = (recip_user.full_name or recip_user.email) if recip_user else "Member"
+        r_email = recip_user.email if recip_user else ""
+        shares_resp_list.append(FileShareRecipientResponse(
+            id=s.id,
+            attachment_id=s.attachment_id,
+            shared_by=s.shared_by,
+            sharer_name=current_user.full_name or current_user.email,
+            sharer_email=current_user.email,
+            shared_with=s.shared_with,
+            user_id=s.shared_with,
+            recipient_name=r_name,
+            recipient_email=r_email,
+            avatar_url=getattr(recip_user, 'avatar_url', None) if recip_user else None,
+            permission=s.permission,
+            status=s.status,
+            shared_at=s.shared_at
+        ))
 
     # Real-time WebSocket event
     if notified_recipients:
@@ -1054,8 +1108,17 @@ async def share_file(
         except Exception:
             pass
 
-    file_resps = await build_file_responses(db, [(attachment, uploader)], current_user.id)
-    return file_resps[0]
+    recipient_names = [r.recipient_name for r in shares_resp_list if r.recipient_name]
+    names_str = ", ".join(recipient_names)
+    count = len(shares_resp_list)
+    msg = f"File successfully shared with {count} member(s): {names_str}." if count > 0 else "File successfully shared."
+
+    return ShareFileResponse(
+        status="success",
+        message=msg,
+        shared_count=count,
+        shares=shares_resp_list
+    )
 
 @router.get("/{id}/shares", response_model=List[FileShareRecipientResponse])
 async def list_file_shares(
@@ -1074,16 +1137,20 @@ async def list_file_shares(
     s_stmt = select(AttachmentShare, User).join(User, AttachmentShare.shared_with == User.id).where(
         AttachmentShare.attachment_id == id,
         AttachmentShare.status == "active"
-    )
+    ).order_by(desc(AttachmentShare.shared_at))
     s_res = await db.execute(s_stmt)
     shares = []
     for share, recipient in s_res.all():
         shares.append(FileShareRecipientResponse(
             id=share.id,
             attachment_id=share.attachment_id,
+            shared_by=share.shared_by,
+            sharer_name=None,
+            sharer_email=None,
+            shared_with=recipient.id,
             user_id=recipient.id,
-            user_name=recipient.full_name or recipient.email,
-            email=recipient.email,
+            recipient_name=recipient.full_name or recipient.email,
+            recipient_email=recipient.email,
             avatar_url=getattr(recipient, 'avatar_url', None),
             permission=share.permission,
             status=share.status,
