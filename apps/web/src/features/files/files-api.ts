@@ -90,6 +90,26 @@ export interface DuplicateFileErrorPayload {
   created_at: string;
 }
 
+export interface ShareRecipientItem {
+  id: string;
+  attachment_id: string;
+  shared_by: string;
+  sharer_name?: string;
+  sharer_email?: string;
+  shared_with: string;
+  recipient_name?: string;
+  recipient_email?: string;
+  permission: 'view' | 'edit' | 'admin';
+  status: string;
+  shared_at: string;
+}
+
+export interface ShareFilePayload {
+  recipient_user_ids?: string[];
+  recipient_emails?: string[];
+  permission?: 'view' | 'edit' | 'admin';
+}
+
 export interface UploadFileOptions {
   file: File;
   organizationId?: string;
@@ -98,6 +118,9 @@ export interface UploadFileOptions {
   conversationId?: string;
   messageId?: string;
   forceDuplicate?: boolean;
+  sharedWithUserIds?: string[];
+  recipientEmails?: string[];
+  permission?: 'view' | 'edit' | 'admin';
   onProgress?: (percent: number) => void;
   onAbortRef?: (abortFn: () => void) => void;
   token?: string;
@@ -117,6 +140,9 @@ export async function uploadFile(
   let conversationId: string | undefined;
   let messageId: string | undefined;
   let forceDuplicate: boolean | undefined;
+  let sharedWithUserIds: string[] | undefined;
+  let recipientEmails: string[] | undefined;
+  let permission: 'view' | 'edit' | 'admin' | undefined;
   let onProgress: ((percent: number) => void) | undefined;
   let onAbortRef: ((abortFn: () => void) => void) | undefined;
   let token: string | undefined;
@@ -135,6 +161,9 @@ export async function uploadFile(
     conversationId = options.conversationId;
     messageId = options.messageId;
     forceDuplicate = options.forceDuplicate;
+    sharedWithUserIds = options.sharedWithUserIds;
+    recipientEmails = options.recipientEmails;
+    permission = options.permission;
     onProgress = options.onProgress;
     onAbortRef = options.onAbortRef;
     token = options.token;
@@ -150,6 +179,13 @@ export async function uploadFile(
     if (conversationId) formData.append('conversation_id', conversationId);
     if (messageId) formData.append('message_id', messageId);
     if (forceDuplicate) formData.append('force_duplicate', 'true');
+    if (sharedWithUserIds && sharedWithUserIds.length > 0) {
+      formData.append('shared_with_user_ids', JSON.stringify(sharedWithUserIds));
+    }
+    if (recipientEmails && recipientEmails.length > 0) {
+      formData.append('recipient_emails', JSON.stringify(recipientEmails));
+    }
+    if (permission) formData.append('permission', permission);
 
     if (onAbortRef) {
       onAbortRef(() => xhr.abort());
@@ -349,3 +385,45 @@ export async function getStorageStats(organizationId?: string, workspaceId?: str
   if (!res.ok) throw new Error('Failed to fetch storage statistics');
   return res.json();
 }
+
+export async function shareFile(
+  id: string,
+  payload: ShareFilePayload,
+  token?: string
+): Promise<{ status: string; message: string; shared_count: number; shares: ShareRecipientItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/files/${id}/share`, {
+    method: 'POST',
+    headers: { ...getAuthHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || 'Failed to share file');
+  }
+  return res.json();
+}
+
+export async function listFileShares(id: string, token?: string): Promise<ShareRecipientItem[]> {
+  const res = await fetch(`${API_BASE_URL}/files/${id}/shares`, {
+    headers: getAuthHeaders(token)
+  });
+  if (!res.ok) throw new Error('Failed to fetch file shares');
+  return res.json();
+}
+
+export async function revokeFileShare(
+  id: string,
+  recipientUserId: string,
+  token?: string
+): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE_URL}/files/${id}/share?recipient_user_id=${recipientUserId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(token)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || 'Failed to revoke file share');
+  }
+  return res.json();
+}
+

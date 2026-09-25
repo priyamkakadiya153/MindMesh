@@ -15,7 +15,8 @@ from ..api.dependencies import get_current_user, get_current_user_from_header_or
 from ..models.user import User
 from ..models.organization_member import OrganizationMember
 from ..models.conversations import Conversation, ConversationMember, DirectMessage
-from ..models.attachments import Attachment, AttachmentVersion, AttachmentAccessLog
+from ..models.attachments import Attachment, AttachmentVersion, AttachmentAccessLog, AttachmentShare
+from ..workspace.models import WorkspaceMember
 from ..storage.local_provider import default_storage_provider
 from ..websocket.manager import manager
 from ..activity.service import ActivityService
@@ -52,7 +53,7 @@ class FileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None
-    source_type: str = "direct" # "conversation", "project", "direct", "workspace"
+    source_type: str = "direct" # "conversation", "project", "direct", "workspace", "share"
     source_title: Optional[str] = None
     shared_with: Optional[List[str]] = None
     is_promoted_to_document: bool = False
@@ -73,6 +74,23 @@ class PromoteFilePayload(BaseModel):
     workspace_id: Optional[UUID] = None
     project_id: Optional[UUID] = None
     title: Optional[str] = None
+
+class ShareFilePayload(BaseModel):
+    recipient_user_ids: Optional[List[UUID]] = None
+    recipient_emails: Optional[List[str]] = None
+    permission: str = "view" # view, edit, admin
+    workspace_id: Optional[UUID] = None
+
+class FileShareRecipientResponse(BaseModel):
+    id: UUID
+    attachment_id: UUID
+    user_id: UUID
+    user_name: Optional[str] = None
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
+    permission: str
+    status: str
+    shared_at: datetime
 
 class AttachmentVersionResponse(BaseModel):
     id: UUID
@@ -123,10 +141,36 @@ async def verify_conversation_access(db: AsyncSession, conversation_id: UUID, us
     return conv
 
 async def verify_file_access(db: AsyncSession, attachment: Attachment, user_id: UUID):
+    # 1. Direct uploader always has access
+    if attachment.uploaded_by == user_id:
+        return
+
+    # 2. Check if explicitly shared with the user
+    share_stmt = select(AttachmentShare).where(
+        AttachmentShare.attachment_id == attachment.id,
+        AttachmentShare.shared_with == user_id,
+        AttachmentShare.status == "active"
+    )
+    share_res = await db.execute(share_stmt)
+    if share_res.scalar_one_or_none():
+        return
+
+    # 3. Check conversation membership if conversation attachment
     if attachment.conversation_id:
         await verify_conversation_access(db, attachment.conversation_id, user_id)
         return
 
+    # 4. Check workspace member access if workspace file
+    if attachment.workspace_id:
+        wm_stmt = select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == attachment.workspace_id,
+            WorkspaceMember.user_id == user_id
+        )
+        wm_res = await db.execute(wm_stmt)
+        if wm_res.scalar_one_or_none():
+            return
+
+    # 5. Check organization membership
     stmt = select(OrganizationMember).where(
         OrganizationMember.organization_id == attachment.organization_id,
         OrganizationMember.user_id == user_id,
@@ -259,6 +303,8 @@ async def upload_file(
     conversation_id: Optional[UUID] = Form(None),
     message_id: Optional[UUID] = Form(None),
     force_duplicate: bool = Form(False),
+    shared_with_user_ids: Optional[str] = Form(None), # comma-separated or JSON list of UUIDs
+    recipient_emails: Optional[str] = Form(None), # comma-separated or JSON list of emails
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session)
 ):
@@ -369,6 +415,61 @@ async def upload_file(
         )
         db.add(version_entry)
 
+        # Parse and persist initial recipient shares if provided
+        target_recipients = set()
+        if shared_with_user_ids:
+            try:
+                import json
+                if shared_with_user_ids.startswith("["):
+                    parsed_uids = json.loads(shared_with_user_ids)
+                    for uid in parsed_uids:
+                        target_recipients.add(UUID(str(uid)))
+                else:
+                    for uid_str in shared_with_user_ids.split(","):
+                        if uid_str.strip():
+                            target_recipients.add(UUID(uid_str.strip()))
+            except Exception as e:
+                logger.warning(f"Failed to parse shared_with_user_ids: {e}")
+
+        if recipient_emails:
+            try:
+                import json
+                clean_emails = []
+                if recipient_emails.startswith("["):
+                    clean_emails = [e.strip().lower() for e in json.loads(recipient_emails) if isinstance(e, str) and e.strip()]
+                else:
+                    clean_emails = [e.strip().lower() for e in recipient_emails.split(",") if e.strip()]
+                if clean_emails:
+                    u_stmt = select(User.id).where(func.lower(User.email).in_(clean_emails), User.is_active == True)
+                    u_res = await db.execute(u_stmt)
+                    for uid in u_res.scalars().all():
+                        target_recipients.add(uid)
+            except Exception as e:
+                logger.warning(f"Failed to parse recipient_emails: {e}")
+
+        target_recipients.discard(current_user.id)
+        if target_recipients:
+            org_mems_stmt = select(OrganizationMember.user_id).where(
+                OrganizationMember.organization_id == resolved_org_id,
+                OrganizationMember.user_id.in_(target_recipients),
+                OrganizationMember.is_active == True
+            )
+            org_mems_res = await db.execute(org_mems_stmt)
+            for r_uid in org_mems_res.scalars().all():
+                share_row = AttachmentShare(
+                    id=uuid4(),
+                    attachment_id=att_id,
+                    organization_id=resolved_org_id,
+                    workspace_id=workspace_id,
+                    shared_by=current_user.id,
+                    shared_with=r_uid,
+                    permission="view",
+                    source_type="direct",
+                    status="active",
+                    shared_at=now
+                )
+                db.add(share_row)
+
         await log_audit_event(db, att_id, current_user.id, "upload", request)
 
         try:
@@ -417,31 +518,8 @@ async def upload_file(
             except Exception:
                 pass
 
-        return FileResponse(
-            id=attachment.id,
-            organization_id=attachment.organization_id,
-            workspace_id=attachment.workspace_id,
-            folder_id=attachment.folder_id,
-            conversation_id=attachment.conversation_id,
-            message_id=attachment.message_id,
-            uploaded_by=attachment.uploaded_by,
-            uploader_name=current_user.full_name,
-            original_filename=attachment.original_filename,
-            storage_filename=attachment.storage_filename,
-            mime_type=attachment.mime_type,
-            file_size=attachment.file_size,
-            checksum=attachment.checksum,
-            storage_path=attachment.storage_path,
-            preview_url=f"/api/v1/files/{attachment.id}/preview",
-            download_url=f"/api/v1/files/{attachment.id}/download",
-            version=attachment.version,
-            status=attachment.status,
-            processing_status=attachment.processing_status or "ready",
-            scan_status="Safe",
-            download_count=attachment.download_count,
-            created_at=attachment.created_at,
-            updated_at=attachment.updated_at
-        )
+        file_resps = await build_file_responses(db, [(attachment, current_user)], current_user.id)
+        return file_resps[0]
 
     except HTTPException:
         raise
@@ -458,10 +536,31 @@ async def build_file_responses(
         return []
 
     # 1. Collect conversation_ids and checksums to batch fetch metadata
+    att_ids = [att.id for att, _ in attachments_with_uploaders]
     conv_ids = [att.conversation_id for att, _ in attachments_with_uploaders if att.conversation_id]
     checksums = [att.checksum for att, _ in attachments_with_uploaders if att.checksum]
     filenames = [att.original_filename for att, _ in attachments_with_uploaders]
     org_ids = list({att.organization_id for att, _ in attachments_with_uploaders})
+
+    # Fetch active shares for all attachments
+    shares_map: Dict[UUID, List[str]] = {}
+    shares_recipient_ids: Dict[UUID, List[UUID]] = {}
+    if att_ids:
+        s_stmt = select(AttachmentShare.attachment_id, User).join(
+            User, AttachmentShare.shared_with == User.id
+        ).where(
+            AttachmentShare.attachment_id.in_(att_ids),
+            AttachmentShare.status == "active"
+        )
+        s_res = await db.execute(s_stmt)
+        for aid, u in s_res.all():
+            if aid not in shares_map:
+                shares_map[aid] = []
+                shares_recipient_ids[aid] = []
+            uname = u.full_name or u.email
+            if uname and uname not in shares_map[aid]:
+                shares_map[aid].append(uname)
+                shares_recipient_ids[aid].append(u.id)
 
     conv_map: Dict[UUID, Conversation] = {}
     conv_members_map: Dict[UUID, List[str]] = {}
@@ -518,14 +617,22 @@ async def build_file_responses(
     for att, uploader in attachments_with_uploaders:
         source_type = "direct"
         source_title = "Direct Shared File"
-        shared_with = []
+        shared_with = shares_map.get(att.id, [])
+        recipients = shares_recipient_ids.get(att.id, [])
 
         if att.conversation_id and att.conversation_id in conv_map:
             conv = conv_map[att.conversation_id]
             source_type = "conversation"
             source_title = conv.name or ("Direct Message" if conv.type == "direct" else "Team Chat")
             all_members = conv_members_map.get(att.conversation_id, [])
-            shared_with = [m for m in all_members if m != uploader.full_name]
+            if not shared_with:
+                shared_with = [m for m in all_members if m != uploader.full_name]
+        elif shared_with:
+            source_type = "share" if current_user_id in recipients else "direct"
+            if current_user_id in recipients:
+                source_title = f"Shared by {uploader.full_name or uploader.email}"
+            else:
+                source_title = f"Shared with {', '.join(shared_with)}"
         elif att.workspace_id:
             source_type = "project" if att.folder_id else "workspace"
             source_title = "Workspace / Project File"
@@ -613,6 +720,23 @@ async def list_files(
     cm_res = await db.execute(cm_stmt)
     user_conv_ids = [row[0] for row in cm_res.all()]
 
+    # Subqueries for user's explicit shares
+    shared_to_user_subquery = select(AttachmentShare.attachment_id).where(
+        AttachmentShare.shared_with == current_user.id,
+        AttachmentShare.status == "active"
+    )
+    shared_by_user_subquery = select(AttachmentShare.attachment_id).where(
+        AttachmentShare.shared_by == current_user.id,
+        AttachmentShare.status == "active"
+    )
+
+    # User's accessible workspaces in this org
+    wm_stmt = select(WorkspaceMember.workspace_id).where(
+        WorkspaceMember.user_id == current_user.id
+    )
+    wm_res = await db.execute(wm_stmt)
+    user_ws_ids = [row[0] for row in wm_res.all()]
+
     stmt = select(Attachment, User).join(
         User, Attachment.uploaded_by == User.id
     ).where(
@@ -621,41 +745,61 @@ async def list_files(
         Attachment.is_active == True
     )
 
-    # Enforce basic conversation visibility RBAC
-    if user_conv_ids:
-        access_condition = or_(
-            Attachment.uploaded_by == current_user.id,
-            Attachment.conversation_id.in_(user_conv_ids),
-            Attachment.conversation_id == None
+    # Base Access Condition:
+    # 1. User is uploader
+    # 2. File was explicitly shared with user
+    # 3. File was uploaded in a conversation user is a member of
+    # 4. File is in a workspace user is a member of (or general org file without restricted conversation)
+    access_condition = or_(
+        Attachment.uploaded_by == current_user.id,
+        Attachment.id.in_(shared_to_user_subquery),
+        Attachment.conversation_id.in_(user_conv_ids) if user_conv_ids else False,
+        and_(
+            Attachment.conversation_id == None,
+            or_(
+                Attachment.workspace_id.in_(user_ws_ids) if user_ws_ids else False,
+                Attachment.workspace_id == None
+            )
         )
-    else:
-        access_condition = or_(
-            Attachment.uploaded_by == current_user.id,
-            Attachment.conversation_id == None
-        )
+    )
     stmt = stmt.where(access_condition)
 
     # Sharing filters
     if sharing_filter == "shared_with_me":
-        if user_conv_ids:
-            stmt = stmt.where(
-                Attachment.uploaded_by != current_user.id,
-                or_(
-                    Attachment.conversation_id.in_(user_conv_ids),
-                    Attachment.conversation_id == None
+        # Files explicitly shared with current user OR received in conversations
+        stmt = stmt.where(
+            Attachment.uploaded_by != current_user.id,
+            or_(
+                Attachment.id.in_(shared_to_user_subquery),
+                Attachment.conversation_id.in_(user_conv_ids) if user_conv_ids else False
+            )
+        )
+    elif sharing_filter == "shared_by_me":
+        # Files uploaded by current user OR explicitly shared by current user
+        stmt = stmt.where(
+            or_(
+                Attachment.uploaded_by == current_user.id,
+                Attachment.id.in_(shared_by_user_subquery)
+            )
+        )
+    elif sharing_filter == "recent":
+        stmt = stmt.where(
+            or_(
+                Attachment.created_at >= (datetime.utcnow() - timedelta(days=7)),
+                Attachment.id.in_(
+                    select(AttachmentShare.attachment_id).where(
+                        or_(AttachmentShare.shared_with == current_user.id, AttachmentShare.shared_by == current_user.id),
+                        AttachmentShare.status == "active",
+                        AttachmentShare.shared_at >= (datetime.utcnow() - timedelta(days=7))
+                    )
                 )
             )
-        else:
-            stmt = stmt.where(
-                Attachment.uploaded_by != current_user.id,
-                Attachment.conversation_id == None
-            )
-    elif sharing_filter == "shared_by_me":
-        stmt = stmt.where(Attachment.uploaded_by == current_user.id)
-    elif sharing_filter == "recent":
-        stmt = stmt.where(Attachment.created_at >= (datetime.utcnow() - timedelta(days=7)))
+        )
     elif sharing_filter == "conversations":
-        stmt = stmt.where(Attachment.conversation_id != None)
+        stmt = stmt.where(
+            Attachment.conversation_id.isnot(None),
+            Attachment.conversation_id.in_(user_conv_ids) if user_conv_ids else False
+        )
     elif sharing_filter == "projects":
         stmt = stmt.where(
             Attachment.conversation_id == None,
@@ -663,19 +807,14 @@ async def list_files(
         )
 
     if workspace_id:
-        if sharing_filter == "conversations":
-            # Direct conversation files are scoped to the conversation and organization
+        if sharing_filter in ("conversations", "shared_with_me"):
+            # If directly shared with current user or in a DM, do not hide just because workspace_id differs
             pass
-        elif sharing_filter == "shared_with_me":
-            stmt = stmt.where(or_(
-                Attachment.conversation_id != None,
-                Attachment.workspace_id == workspace_id,
-                Attachment.workspace_id == None
-            ))
         else:
             stmt = stmt.where(or_(
                 Attachment.workspace_id == workspace_id,
                 Attachment.workspace_id == None,
+                Attachment.id.in_(shared_to_user_subquery),
                 Attachment.conversation_id.in_(user_conv_ids) if user_conv_ids else False
             ))
     if folder_id:
@@ -811,6 +950,180 @@ async def get_file_details(
 
     file_resps = await build_file_responses(db, [(att, uploader)], current_user.id)
     return file_resps[0]
+
+@router.post("/{id}/share", response_model=FileResponse)
+async def share_file(
+    id: UUID,
+    payload: ShareFilePayload,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    stmt = select(Attachment, User).join(User, Attachment.uploaded_by == User.id).where(
+        Attachment.id == id,
+        Attachment.status == "active",
+        Attachment.is_active == True
+    )
+    res = await db.execute(stmt)
+    row = res.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found.")
+
+    attachment, uploader = row
+    await verify_file_access(db, attachment, current_user.id)
+
+    target_user_ids = set(payload.recipient_user_ids or [])
+
+    if payload.recipient_emails:
+        clean_emails = [e.strip().lower() for e in payload.recipient_emails if e.strip()]
+        if clean_emails:
+            u_stmt = select(User.id).where(func.lower(User.email).in_(clean_emails), User.is_active == True)
+            u_res = await db.execute(u_stmt)
+            for uid in u_res.scalars().all():
+                target_user_ids.add(uid)
+
+    # Disallow sharing with oneself
+    target_user_ids.discard(current_user.id)
+
+    if not target_user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid recipient users provided.")
+
+    # Validate that recipients exist and are active in organization
+    org_mems_stmt = select(OrganizationMember.user_id).where(
+        OrganizationMember.organization_id == attachment.organization_id,
+        OrganizationMember.user_id.in_(target_user_ids),
+        OrganizationMember.is_active == True
+    )
+    org_mems_res = await db.execute(org_mems_stmt)
+    valid_org_user_ids = set(org_mems_res.scalars().all())
+
+    if not valid_org_user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipients must be members of the organization.")
+
+    now = datetime.utcnow()
+    # Check existing shares
+    existing_shares_stmt = select(AttachmentShare).where(
+        AttachmentShare.attachment_id == id,
+        AttachmentShare.shared_with.in_(valid_org_user_ids)
+    )
+    es_res = await db.execute(existing_shares_stmt)
+    existing_shares_map = {s.shared_with: s for s in es_res.scalars().all()}
+
+    notified_recipients = []
+    for uid in valid_org_user_ids:
+        if uid in existing_shares_map:
+            s = existing_shares_map[uid]
+            s.status = "active"
+            s.shared_by = current_user.id
+            s.permission = payload.permission
+            s.shared_at = now
+        else:
+            s = AttachmentShare(
+                id=uuid4(),
+                attachment_id=id,
+                organization_id=attachment.organization_id,
+                workspace_id=payload.workspace_id or attachment.workspace_id,
+                shared_by=current_user.id,
+                shared_with=uid,
+                permission=payload.permission,
+                source_type="direct",
+                status="active",
+                shared_at=now
+            )
+            db.add(s)
+        notified_recipients.append(str(uid))
+
+    await log_audit_event(db, id, current_user.id, "share", request)
+    await db.commit()
+
+    # Real-time WebSocket event
+    if notified_recipients:
+        try:
+            await manager.broadcast_to_users({
+                "event": "file_shared",
+                "file": {
+                    "id": str(attachment.id),
+                    "original_filename": attachment.original_filename,
+                    "mime_type": attachment.mime_type,
+                    "file_size": attachment.file_size,
+                    "shared_by": current_user.full_name or current_user.email,
+                    "shared_at": now.isoformat()
+                }
+            }, notified_recipients)
+        except Exception:
+            pass
+
+    file_resps = await build_file_responses(db, [(attachment, uploader)], current_user.id)
+    return file_resps[0]
+
+@router.get("/{id}/shares", response_model=List[FileShareRecipientResponse])
+async def list_file_shares(
+    id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    stmt = select(Attachment).where(Attachment.id == id)
+    res = await db.execute(stmt)
+    att = res.scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found.")
+
+    await verify_file_access(db, att, current_user.id)
+
+    s_stmt = select(AttachmentShare, User).join(User, AttachmentShare.shared_with == User.id).where(
+        AttachmentShare.attachment_id == id,
+        AttachmentShare.status == "active"
+    )
+    s_res = await db.execute(s_stmt)
+    shares = []
+    for share, recipient in s_res.all():
+        shares.append(FileShareRecipientResponse(
+            id=share.id,
+            attachment_id=share.attachment_id,
+            user_id=recipient.id,
+            user_name=recipient.full_name or recipient.email,
+            email=recipient.email,
+            avatar_url=getattr(recipient, 'avatar_url', None),
+            permission=share.permission,
+            status=share.status,
+            shared_at=share.shared_at
+        ))
+    return shares
+
+@router.delete("/{id}/share")
+async def revoke_file_share(
+    id: UUID,
+    recipient_user_id: Optional[UUID] = Query(None),
+    share_id: Optional[UUID] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session)
+):
+    stmt = select(Attachment).where(Attachment.id == id)
+    res = await db.execute(stmt)
+    att = res.scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found.")
+
+    await verify_file_access(db, att, current_user.id)
+
+    s_stmt = select(AttachmentShare).where(
+        AttachmentShare.attachment_id == id,
+        AttachmentShare.status == "active"
+    )
+    if share_id:
+        s_stmt = s_stmt.where(AttachmentShare.id == share_id)
+    elif recipient_user_id:
+        s_stmt = s_stmt.where(AttachmentShare.shared_with == recipient_user_id)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide recipient_user_id or share_id.")
+
+    s_res = await db.execute(s_stmt)
+    shares = s_res.scalars().all()
+    for s in shares:
+        s.status = "revoked"
+
+    await db.commit()
+    return {"status": "success", "message": "Share revoked."}
 
 @router.post("/{id}/promote-to-document", status_code=status.HTTP_201_CREATED)
 @router.post("/{id}/add-to-documents", status_code=status.HTTP_201_CREATED)
@@ -1320,4 +1633,6 @@ async def get_file_audit_logs(
             accessed_at=log_item.accessed_at
         ))
     return result
+
+
 

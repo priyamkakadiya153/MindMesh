@@ -13,6 +13,7 @@ import {
 } from '../../features/files/files-api';
 import { FileUploadModal } from '../../features/files/components/FileUploadModal';
 import { FilePreviewModal } from '../../features/files/components/FilePreviewModal';
+import { ShareFileModal } from '../../features/files/components/ShareFileModal';
 import { MoveFolderModal } from '../../features/files/components/MoveFolderModal';
 import { VersionHistoryModal } from '../../features/files/components/VersionHistoryModal';
 import { AuditLogModal } from '../../features/files/components/AuditLogModal';
@@ -42,6 +43,7 @@ import {
   ChevronLeft,
   BarChart3,
   Users,
+  UserPlus,
   MessageSquare,
   Sparkles,
   CheckCircle2,
@@ -91,6 +93,7 @@ export function SharedFilesPage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isStorageStatsOpen, setIsStorageStatsOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<AttachmentItem | null>(null);
+  const [shareItem, setShareItem] = useState<AttachmentItem | null>(null);
   const [moveItem, setMoveItem] = useState<AttachmentItem | null>(null);
   const [versionItem, setVersionItem] = useState<AttachmentItem | null>(null);
   const [auditItem, setAuditItem] = useState<AttachmentItem | null>(null);
@@ -628,6 +631,13 @@ export function SharedFilesPage() {
 
                     <div className="flex items-center space-x-1">
                       <button
+                        onClick={() => setShareItem(file)}
+                        className="p-1 hover:bg-bgHover text-accentText hover:text-accent rounded"
+                        title="Share with members"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={() => setPreviewItem(file)}
                         className="p-1 hover:bg-bgHover text-textMuted hover:text-textPrimary rounded"
                         title="Preview"
@@ -744,6 +754,13 @@ export function SharedFilesPage() {
 
                   <div className="flex items-center space-x-1">
                     <button
+                      onClick={() => setShareItem(file)}
+                      className="p-1.5 hover:bg-bgHover text-accentText hover:text-accent rounded-lg"
+                      title="Share with members"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => setPreviewItem(file)}
                       className="p-1.5 hover:bg-bgHover text-textMuted hover:text-textPrimary rounded-lg"
                       title="Preview"
@@ -841,6 +858,17 @@ export function SharedFilesPage() {
 
       {/* Universal Preview Modal */}
       <FilePreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+
+      {/* Share File Modal */}
+      <ShareFileModal
+        isOpen={!!shareItem}
+        file={shareItem}
+        onClose={() => setShareItem(null)}
+        organizationId={currentOrg?.id}
+        workspaceId={currentWorkspace?.id}
+        token={token || undefined}
+        onShareUpdated={loadSharedFiles}
+      />
 
       {/* Move Folder Modal */}
       <MoveFolderModal

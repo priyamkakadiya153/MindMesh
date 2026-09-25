@@ -25,7 +25,7 @@ from .agent import Agent, AgentMemory
 from .cognitive_agent import CognitiveAgent, CognitiveAgentExecution, CognitiveAgentOutput
 from .conversation import ConversationMemory
 from .conversations import Conversation, ConversationMember, DirectMessage, MessageRead, TypingStatus, UserPresence
-from .attachments import Attachment, AttachmentVersion, AttachmentAccessLog
+from .attachments import Attachment, AttachmentVersion, AttachmentAccessLog, AttachmentShare
 from .advanced_messaging import MessageReaction, MessageMention, PinnedMessage, FavoriteConversation, MessageDraft
 from .search_models import SavedSearch, RecentSearch
 from .audit import AuditLog

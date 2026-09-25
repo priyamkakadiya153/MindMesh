@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { X, UploadCloud, File, AlertCircle, RefreshCw, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { X, UploadCloud, File, AlertCircle, RefreshCw, CheckCircle2, ShieldCheck, Loader2, Users, Check, Search } from 'lucide-react';
 import { uploadFile, uploadFileVersion, AttachmentItem, DuplicateFileErrorPayload } from '../files-api';
+import { getMembersDirectory } from '../../members/api';
 import { DuplicateDialog } from './DuplicateDialog';
 
 interface FileUploadModalProps {
@@ -37,9 +38,43 @@ export function FileUploadModal({
   const [tasks, setTasks] = useState<UploadTask[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [activeDuplicateTask, setActiveDuplicateTask] = useState<UploadTask | null>(null);
+  const [members, setMembers] = useState<any[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [showMemberPicker, setShowMemberPicker] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!isOpen || !organizationId) return;
+    let isMounted = true;
+    getMembersDirectory(token || localStorage.getItem('token') || '', organizationId, workspaceId)
+      .then((data) => {
+        if (isMounted) {
+          const list = Array.isArray(data) ? data : data.members || [];
+          setMembers(list);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, organizationId, workspaceId, token]);
+
   if (!isOpen) return null;
+
+  const filteredMembers = members.filter((m) => {
+    const email = (m.email || m.user?.email || '').toLowerCase();
+    const name = (m.username || (m.user?.first_name ? `${m.user.first_name} ${m.user.last_name || ''}` : '') || '').toLowerCase();
+    const q = memberSearch.toLowerCase().trim();
+    if (!q) return true;
+    return email.includes(q) || name.includes(q);
+  });
+
+  const toggleMember = (userId: string) => {
+    setSelectedMemberIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
 
   const processFileSelection = (files: FileList | File[]) => {
     const fileArray = Array.from(files);
@@ -79,6 +114,7 @@ export function FileUploadModal({
         organizationId,
         workspaceId,
         folderId,
+        sharedWithUserIds: selectedMemberIds.length > 0 ? selectedMemberIds : undefined,
         token,
         forceDuplicate,
         onProgress: (percent) => {
@@ -234,6 +270,74 @@ export function FileUploadModal({
 
         {/* Dropzone */}
         <div className="p-4 overflow-y-auto space-y-4">
+          {/* Member picker for sharing */}
+          {members.length > 0 && (
+            <div className="p-3 bg-bgTertiary/80 border border-borderColor rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-textPrimary flex items-center space-x-1.5">
+                  <Users className="w-3.5 h-3.5 text-accentText" />
+                  <span>Share directly with members ({selectedMemberIds.length} selected)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowMemberPicker(!showMemberPicker)}
+                  className="text-[11px] text-accentText hover:underline font-medium"
+                >
+                  {showMemberPicker ? 'Hide Members' : 'Select Members'}
+                </button>
+              </div>
+
+              {showMemberPicker && (
+                <div className="space-y-2 pt-1">
+                  <div className="relative">
+                    <Search className="w-3 h-3 text-textMuted absolute left-2.5 top-2" />
+                    <input
+                      type="text"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="Filter members..."
+                      className="w-full bg-bgInput text-textPrimary placeholder-textMuted text-[11px] rounded-lg pl-7 pr-2.5 py-1 border border-borderColor focus:outline-none focus:border-accent"
+                    />
+                  </div>
+
+                  <div className="max-h-28 overflow-y-auto space-y-1">
+                    {filteredMembers.map((m) => {
+                      const uId = m.user_id || m.user?.id || m.id || '';
+                      const uEmail = m.email || m.user?.email || '';
+                      const uName = m.username || (m.user?.first_name ? `${m.user.first_name} ${m.user.last_name || ''}`.trim() : '') || uEmail;
+                      const isSelected = selectedMemberIds.includes(uId);
+
+                      return (
+                        <div
+                          key={uId}
+                          onClick={() => toggleMember(uId)}
+                          className={`flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-accentSubtle text-accentText border border-accent/40 font-semibold'
+                              : 'hover:bg-bgHover text-textSecondary border border-transparent'
+                          }`}
+                        >
+                          <span className="truncate max-w-[280px]">
+                            {uName} <span className="text-[10px] text-textMuted">({uEmail})</span>
+                          </span>
+                          <div
+                            className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected
+                                ? 'bg-accent border-accent text-white'
+                                : 'border-borderColor bg-bgInput'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}

@@ -32,10 +32,11 @@ class Attachment(BaseEntity):
     download_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tags: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
-    uploader: Mapped["User"] = relationship("User")
+    uploader: Mapped["User"] = relationship("User", foreign_keys=[uploaded_by])
     folder: Mapped[Optional["Folder"]] = relationship("Folder")
     versions: Mapped[List["AttachmentVersion"]] = relationship(back_populates="attachment", cascade="all, delete-orphan")
     access_logs: Mapped[List["AttachmentAccessLog"]] = relationship(back_populates="attachment", cascade="all, delete-orphan")
+    shares: Mapped[List["AttachmentShare"]] = relationship(back_populates="attachment", cascade="all, delete-orphan")
 
 
 class AttachmentVersion(BaseEntity):
@@ -63,3 +64,23 @@ class AttachmentAccessLog(BaseEntity):
 
     attachment: Mapped["Attachment"] = relationship(back_populates="access_logs")
     user: Mapped["User"] = relationship("User")
+
+
+class AttachmentShare(BaseEntity):
+    __tablename__ = "attachment_shares"
+
+    attachment_id: Mapped[UUID] = mapped_column(ForeignKey("attachments.id", ondelete="CASCADE"), index=True, nullable=False)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False)
+    workspace_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("workspaces.id", ondelete="SET NULL"), index=True, nullable=True)
+    shared_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    shared_with: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    permission: Mapped[str] = mapped_column(String(30), nullable=False, default="view") # view, edit, admin
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="direct") # direct, workspace, project, conversation
+    source_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active") # active, revoked
+    shared_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    attachment: Mapped["Attachment"] = relationship(back_populates="shares")
+    sharer: Mapped["User"] = relationship("User", foreign_keys=[shared_by])
+    recipient: Mapped["User"] = relationship("User", foreign_keys=[shared_with])
+
