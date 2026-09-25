@@ -701,16 +701,17 @@ async def list_files(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session)
 ):
-    resolved_org_id = organization_id
-    if not resolved_org_id:
+    if organization_id:
+        target_org_ids = [organization_id]
+    else:
         mem_stmt = select(OrganizationMember.organization_id).where(
             OrganizationMember.user_id == current_user.id,
             OrganizationMember.is_active == True
-        ).limit(1)
+        )
         res = await db.execute(mem_stmt)
-        resolved_org_id = res.scalar_one_or_none()
+        target_org_ids = [row[0] for row in res.all()]
 
-    if not resolved_org_id:
+    if not target_org_ids:
         return PaginatedFileResponse(items=[], total=0, page=page, page_size=page_size, total_pages=0)
 
     # Resolve user's accessible conversation IDs
@@ -740,7 +741,7 @@ async def list_files(
     stmt = select(Attachment, User).join(
         User, Attachment.uploaded_by == User.id
     ).where(
-        Attachment.organization_id == resolved_org_id,
+        Attachment.organization_id.in_(target_org_ids),
         Attachment.status == "active",
         Attachment.is_active == True
     )
