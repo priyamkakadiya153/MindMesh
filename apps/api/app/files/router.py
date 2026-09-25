@@ -962,7 +962,7 @@ async def share_file(
     stmt = select(Attachment, User).join(User, Attachment.uploaded_by == User.id).where(
         Attachment.id == id,
         Attachment.status == "active",
-        Attachment.is_active == True
+        Attachment.deleted_at == None
     )
     res = await db.execute(stmt)
     row = res.first()
